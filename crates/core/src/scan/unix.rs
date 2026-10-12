@@ -23,15 +23,9 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use super::DirChunkWork;
 use crate::assemble::{ChunkEntry, DirChunk};
 use crate::tree::Kind;
-
-/// Resultado de enumerar uma pasta: o chunk e as subpastas a percorrer, cada uma com o id
-/// temporário já gravado em `ChunkEntry::subdir`.
-pub(crate) struct DirChunkWork {
-    pub chunk: DirChunk,
-    pub subdirs: Vec<(u32, PathBuf)>,
-}
 
 /// Enumera `path`. Cada subpasta recebe um id de `next_id` (`fetch_add`, `Relaxed`).
 pub(crate) fn read_dir_chunk(

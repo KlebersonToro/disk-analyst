@@ -11,11 +11,8 @@ name = "disk_analyst_core"
 workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
 
 [dev-dependencies]
 proptest.workspace = true
 disk-analyst-synth = { path = "../synth" }
-
-[target.'cfg(windows)'.dev-dependencies]
-windows = { workspace = true, features = ["Win32_Storage_FileSystem"] }
