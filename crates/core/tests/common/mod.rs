@@ -35,38 +35,6 @@ impl Drop for TempBase {
     }
 }
 
-/// Link para uma pasta (symlink no Linux, junction no Windows), removido no `Drop` sem tocar no
-/// alvo.
-pub struct LinkGuard(PathBuf);
-
-impl Drop for LinkGuard {
-    fn drop(&mut self) {
-        #[cfg(unix)]
-        let _ = fs::remove_file(&self.0);
-        #[cfg(windows)]
-        let _ = fs::remove_dir(&self.0);
-    }
-}
-
-#[cfg(unix)]
-pub fn make_dir_link(link: &Path, target: &Path) -> LinkGuard {
-    std::os::unix::fs::symlink(target, link).expect("criar symlink");
-    LinkGuard(link.to_path_buf())
-}
-
-#[cfg(windows)]
-pub fn make_dir_link(link: &Path, target: &Path) -> LinkGuard {
-    let status = std::process::Command::new("cmd")
-        .args(["/C", "mklink", "/J"])
-        .arg(link)
-        .arg(target)
-        .output()
-        .expect("executar cmd")
-        .status;
-    assert!(status.success(), "mklink /J falhou");
-    LinkGuard(link.to_path_buf())
-}
-
 pub fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/fixtures")

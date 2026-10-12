@@ -4,14 +4,46 @@
 mod common;
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use common::{TempBase, fixture, make_dir_link};
+use common::{TempBase, fixture};
 use disk_analyst_core::control::{CancelToken, ScanCounters};
 use disk_analyst_core::report::build_report;
 use disk_analyst_core::scan::{ScanError, ScanOptions, scan};
 use disk_analyst_core::tree::{Kind, ScanTree};
 use disk_analyst_synth::{allocated_size, generate, load_spec};
+
+/// Link para uma pasta (symlink no Linux, junction no Windows), removido no `Drop` sem tocar no
+/// alvo.
+struct LinkGuard(PathBuf);
+
+impl Drop for LinkGuard {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        let _ = fs::remove_file(&self.0);
+        #[cfg(windows)]
+        let _ = fs::remove_dir(&self.0);
+    }
+}
+
+#[cfg(unix)]
+fn make_dir_link(link: &Path, target: &Path) -> LinkGuard {
+    std::os::unix::fs::symlink(target, link).expect("criar symlink");
+    LinkGuard(link.to_path_buf())
+}
+
+#[cfg(windows)]
+fn make_dir_link(link: &Path, target: &Path) -> LinkGuard {
+    let status = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .output()
+        .expect("executar cmd")
+        .status;
+    assert!(status.success(), "mklink /J falhou");
+    LinkGuard(link.to_path_buf())
+}
 
 /// Valores do `expected.json` escrito pelo gerador.
 struct Expected {
