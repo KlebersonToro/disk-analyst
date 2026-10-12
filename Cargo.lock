@@ -109,6 +109,7 @@ version = "0.1.0"
 name = "disk-analyst-core"
 version = "0.1.0"
 dependencies = [
+ "disk-analyst-synth",
  "proptest",
  "windows",
 ]
