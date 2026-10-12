@@ -32,6 +32,11 @@ Item que a varredura encontrou mas não pôde ler por falta de permissão; é co
 interrompe a varredura.
 _Evitar_: erro, negado, item com falha
 
+**Link não seguido**:
+Item que aponta para outro lugar (junction, symlink, ponto de montagem) e é registrado sem que a
+varredura percorra o destino; ocupa zero no relatório.
+_Evitar_: atalho, link quebrado, reparse point
+
 **Arquivo na nuvem**:
 Arquivo sincronizado (por exemplo OneDrive sob demanda) cujo conteúdo não está armazenado
 localmente; ocupa zero de Tamanho alocado.
@@ -47,6 +52,15 @@ _Evitar_: tamanho do arquivo, tamanho real
 Espaço que o arquivo de fato ocupa no volume; é o que se libera ao excluí-lo. É o tamanho
 exibido por padrão.
 _Evitar_: tamanho em disco, espaço ocupado
+
+**Tamanho próprio**:
+Soma dos tamanhos dos arquivos que estão diretamente dentro de uma pasta, sem contar subpastas;
+usado para ranquear pastas.
+_Evitar_: tamanho local, tamanho direto
+
+**Tamanho agregado**:
+Soma dos tamanhos de tudo o que está abaixo de uma pasta, em qualquer profundidade.
+_Evitar_: tamanho total da pasta, tamanho recursivo
 
 ## Decisão de limpeza
 
