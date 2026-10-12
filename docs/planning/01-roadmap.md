@@ -19,7 +19,7 @@ A ordem prioriza o que mais importa para o uso real: **relatórios e integraçã
 
 ## Fase 1 — Varredura comum de diretórios (MVP)
 
-- Varredura paralela (`FindFirstFileExW` com `FIND_FIRST_EX_LARGE_FETCH` / `std::fs`) com `rayon`.
+- Varredura paralela (`GetFileInformationByHandleEx` + `FileIdBothDirectoryInfo` no Windows, ver [ADR-0007](../adr/0007-tamanho-alocado-e-enumeracao.md); `std::fs` no Linux) com `rayon`.
 - Árvore em arena: `Vec<Node>` com índices `u32`, nomes num buffer contínuo, tamanhos agregados de baixo para cima.
 - Tamanho **lógico e alocado** desde o início (base para "espaço recuperável").
 - Arquivos da nuvem (OneDrive/placeholders, `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS` / `OFFLINE`) marcados como "na nuvem", com tamanho local zero.
