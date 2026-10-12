@@ -9,9 +9,10 @@ use std::path::Path;
 
 use windows::Win32::Foundation::{CloseHandle, ERROR_NO_MORE_FILES, HANDLE};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY,
-    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileIdBothDirectoryInfo,
-    FileIdBothDirectoryRestartInfo, GetFileInformationByHandleEx, OPEN_EXISTING,
+    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_FLAGS_AND_ATTRIBUTES, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileIdBothDirectoryInfo,
+    FileIdBothDirectoryRestartInfo, FileStandardInfo, GetFileInformationByHandleEx, OPEN_EXISTING,
 };
 use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
 use windows::Win32::System::Threading::GetCurrentProcess;
@@ -30,23 +31,24 @@ fn to_io_error(error: &windows::core::Error, context: String) -> io::Error {
     io::Error::new(kind, format!("{context}: {error}"))
 }
 
-/// Handle de uma pasta aberta para listagem. Fecha no Drop, uma única vez; não é `Copy` nem
-/// `Clone`.
-pub(crate) struct DirHandle(HANDLE);
+/// Dono de um HANDLE aberto: fecha no Drop, uma única vez; não é `Copy` nem `Clone`.
+pub(crate) struct OwnedHandle(HANDLE);
 
-impl Drop for DirHandle {
+impl Drop for OwnedHandle {
     fn drop(&mut self) {
-        // SAFETY: `self.0` veio de um `CreateFileW` bem-sucedido em `open_dir` e só é fechado
+        // SAFETY: `self.0` veio de um `CreateFileW` bem-sucedido em `open_handle` e só é fechado
         // aqui, pelo único dono. Drop roda uma vez, então não há fechamento duplo. O erro do
         // fechamento é ignorado: não há o que fazer com ele num Drop.
         let _ = unsafe { CloseHandle(self.0) };
     }
 }
 
-/// Abre `path` para listar o conteúdo. Com `follow_link == false` abre o próprio reparse point
-/// (`FILE_FLAG_OPEN_REPARSE_POINT`) em vez do alvo. O caminho deve ser absoluto (a T018 usa a
-/// forma verbatim `\\?\`).
-pub(crate) fn open_dir(path: &Path, follow_link: bool) -> io::Result<DirHandle> {
+/// Abre `path` com o `access` e as `flags` dadas, compartilhando leitura, escrita e exclusão.
+fn open_handle(
+    path: &Path,
+    access: u32,
+    flags: FILE_FLAGS_AND_ATTRIBUTES,
+) -> io::Result<OwnedHandle> {
     let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
     if wide.contains(&0) {
         return Err(io::Error::new(
@@ -56,11 +58,6 @@ pub(crate) fn open_dir(path: &Path, follow_link: bool) -> io::Result<DirHandle> 
     }
     wide.push(0);
 
-    let mut flags = FILE_FLAG_BACKUP_SEMANTICS;
-    if !follow_link {
-        flags |= FILE_FLAG_OPEN_REPARSE_POINT;
-    }
-
     // SAFETY: `wide` termina em NUL (e não tem NUL no meio, conferido acima) e continua vivo até
     // o fim desta chamada, então `wide.as_ptr()` aponta para uma string UTF-16 terminada em NUL,
     // válida durante a chamada. Os demais argumentos são valores (acesso, compartilhamento,
@@ -68,7 +65,7 @@ pub(crate) fn open_dir(path: &Path, follow_link: bool) -> io::Result<DirHandle> 
     let raw = unsafe {
         CreateFileW(
             PCWSTR(wide.as_ptr()),
-            FILE_LIST_DIRECTORY.0,
+            access,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             None,
             OPEN_EXISTING,
@@ -77,13 +74,61 @@ pub(crate) fn open_dir(path: &Path, follow_link: bool) -> io::Result<DirHandle> 
         )
     }
     .map_err(|e| to_io_error(&e, format!("CreateFileW({})", path.display())))?;
-    Ok(DirHandle(raw))
+    Ok(OwnedHandle(raw))
+}
+
+/// Abre `path` para listar o conteúdo. Com `follow_link == false` abre o próprio reparse point
+/// (`FILE_FLAG_OPEN_REPARSE_POINT`) em vez do alvo. O caminho deve ser absoluto (a T018 usa a
+/// forma verbatim `\\?\`).
+pub(crate) fn open_dir(path: &Path, follow_link: bool) -> io::Result<OwnedHandle> {
+    let mut flags = FILE_FLAG_BACKUP_SEMANTICS;
+    if !follow_link {
+        flags |= FILE_FLAG_OPEN_REPARSE_POINT;
+    }
+    open_handle(path, FILE_LIST_DIRECTORY.0, flags)
+}
+
+/// Tamanho lógico (`EndOfFile`) e alocado (`AllocationSize`) de um arquivo, SEGUINDO links. É o
+/// que a raiz que é arquivo usa (T018). O caminho deve ser absoluto (forma verbatim).
+pub(crate) fn file_sizes(path: &Path) -> io::Result<(u64, u64)> {
+    let handle = open_handle(path, FILE_READ_ATTRIBUTES.0, FILE_FLAG_BACKUP_SEMANTICS)?;
+    let mut info = FILE_STANDARD_INFO::default();
+    let info_len = u32::try_from(size_of::<FILE_STANDARD_INFO>())
+        .map_err(|_| io::Error::other("FILE_STANDARD_INFO maior que u32"))?;
+
+    // SAFETY: `handle.0` é um HANDLE válido, aberto acima e possuído por `handle`, que o fecha no
+    // Drop. O buffer é `info`, um `FILE_STANDARD_INFO` (`repr(C)`, alinhado pelo próprio tipo)
+    // com exatamente `info_len` bytes, o tamanho declarado à chamada. A chamada só escreve ali.
+    unsafe {
+        GetFileInformationByHandleEx(
+            handle.0,
+            FileStandardInfo,
+            (&mut info as *mut FILE_STANDARD_INFO).cast(),
+            info_len,
+        )
+    }
+    .map_err(|e| {
+        to_io_error(
+            &e,
+            format!("GetFileInformationByHandleEx({})", path.display()),
+        )
+    })?;
+
+    let negative = |name: &str| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{name} negativo em {}", path.display()),
+        )
+    };
+    let logical = u64::try_from(info.EndOfFile).map_err(|_| negative("EndOfFile"))?;
+    let allocated = u64::try_from(info.AllocationSize).map_err(|_| negative("AllocationSize"))?;
+    Ok((logical, allocated))
 }
 
 /// Lê o próximo lote de registros `FILE_ID_BOTH_DIR_INFO` em `buf`. `restart == true` recomeça a
 /// listagem. Devolve `false` quando não há mais arquivos (`ERROR_NO_MORE_FILES`); outros erros
 /// são `Err`. O buffer é de `u64` para ficar alinhado a 8 bytes, como a API exige.
-pub(crate) fn read_batch(dir: &DirHandle, buf: &mut [u64], restart: bool) -> io::Result<bool> {
+pub(crate) fn read_batch(dir: &OwnedHandle, buf: &mut [u64], restart: bool) -> io::Result<bool> {
     let class = if restart {
         FileIdBothDirectoryRestartInfo
     } else {

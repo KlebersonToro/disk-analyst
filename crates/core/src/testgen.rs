@@ -27,7 +27,12 @@ pub(crate) fn chunk(id: u32, specs: &[Spec]) -> DirChunk {
         });
         names.extend(units);
     }
-    DirChunk { id, names, entries }
+    DirChunk {
+        id,
+        names,
+        entries,
+        inaccessible: false,
+    }
 }
 
 /// Node cujo nome é `name`. Os nomes dos testes que usam isto são únicos na árvore.

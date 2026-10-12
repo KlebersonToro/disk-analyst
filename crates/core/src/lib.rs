@@ -3,7 +3,7 @@ pub mod control;
 pub mod hardlinks;
 pub mod names;
 pub mod report;
-mod scan;
+pub mod scan;
 pub mod sysinfo;
 #[cfg(test)]
 pub(crate) mod testgen;

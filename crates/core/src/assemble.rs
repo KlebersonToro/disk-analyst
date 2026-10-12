@@ -35,6 +35,9 @@ pub struct DirChunk {
     pub id: u32,
     pub names: Vec<u16>,
     pub entries: Vec<ChunkEntry>,
+    /// A pasta não pôde ser lida (por exemplo, permissão negada): o chunk vem vazio e o Node da
+    /// pasta é marcado `inaccessible` na montagem, em vez de contá-la como vazia em silêncio.
+    pub inaccessible: bool,
 }
 
 impl DirChunk {
@@ -81,6 +84,9 @@ pub fn assemble(chunks: Vec<DirChunk>, root_path: String) -> Assembled {
     while let Some((parent, chunk_id)) = queue.pop_front() {
         let chunk = &chunks[index[&chunk_id]];
         consumed += 1;
+        if chunk.inaccessible {
+            nodes[parent as usize].set_inaccessible(true);
+        }
 
         let mut order: Vec<&ChunkEntry> = chunk.entries.iter().collect();
         order.sort_by(|a, b| chunk.entry_name(a).cmp(chunk.entry_name(b)));
@@ -372,6 +378,7 @@ mod tests {
                     id: ids[folder],
                     names,
                     entries,
+                    inaccessible: false,
                 }
             })
             .collect()
@@ -674,5 +681,23 @@ mod tests {
         };
         assert_eq!(size("od"), (15, 12));
         assert_eq!((tree.nodes[0].logical, tree.nodes[0].allocated), (15, 12));
+    }
+
+    #[test]
+    fn inaccessible_chunk_marks_its_folder_and_has_no_children() {
+        let root = chunk(0, &[("negada", Kind::Dir, Some(1), None, 0, 0)]);
+        let denied = DirChunk {
+            id: 1,
+            names: Vec::new(),
+            entries: Vec::new(),
+            inaccessible: true,
+        };
+
+        let tree = assemble(vec![root, denied], "raiz".into()).tree;
+
+        let folder = tree.nodes[finder(&tree, "negada") as usize];
+        assert!(folder.inaccessible());
+        assert_eq!(folder.child_count, 0);
+        assert!(!tree.nodes[0].inaccessible(), "a raiz não é afetada");
     }
 }

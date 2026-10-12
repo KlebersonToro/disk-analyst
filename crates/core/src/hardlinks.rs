@@ -294,6 +294,7 @@ mod tests {
                     id: ids[f],
                     names,
                     entries,
+                    inaccessible: false,
                 }
             })
             .collect()

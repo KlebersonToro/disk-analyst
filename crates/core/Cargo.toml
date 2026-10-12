@@ -7,6 +7,9 @@ rust-version.workspace = true
 [lib]
 name = "disk_analyst_core"
 
+[dependencies]
+rayon.workspace = true
+
 [lints]
 workspace = true
 
@@ -15,4 +18,5 @@ windows = { workspace = true, features = ["Win32_Foundation", "Win32_Security", 
 
 [dev-dependencies]
 proptest.workspace = true
+serde_json.workspace = true
 disk-analyst-synth = { path = "../synth" }

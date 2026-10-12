@@ -72,6 +72,7 @@ pub(crate) fn read_dir_chunk(
             id: chunk_id,
             names,
             entries,
+            inaccessible: false,
         },
         subdirs,
     })

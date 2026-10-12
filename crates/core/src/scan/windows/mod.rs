@@ -22,10 +22,10 @@
 //! `follow_root_link == true` abre a pasta SEGUINDO links (só a raiz, decidida pela T018). Com
 //! `false` abre o próprio reparse point com `FILE_FLAG_OPEN_REPARSE_POINT`.
 
-#[allow(dead_code, reason = "consumido pela enumeração de Windows da T017")]
+// Compilado em todos os alvos só nos testes: o código de produção que o usa é o do Windows.
+#[cfg(any(windows, test))]
 pub(crate) mod buffer;
 #[cfg(windows)]
-#[allow(dead_code, reason = "consumido pelo varredor paralelo da T018")]
 pub(crate) mod ffi;
 
 #[cfg(windows)]
@@ -64,7 +64,6 @@ fn invalid(message: impl Into<String>) -> io::Error {
 
 /// Enumera `path`. Cada subpasta recebe um id de `next_id` (`fetch_add`, `Relaxed`).
 #[cfg(windows)]
-#[allow(dead_code, reason = "consumido pelo varredor paralelo da T018")]
 pub(crate) fn read_dir_chunk(
     path: &Path,
     chunk_id: u32,
@@ -161,6 +160,7 @@ pub(crate) fn read_dir_chunk_counted(
         id: chunk_id,
         names,
         entries,
+        inaccessible: false,
     };
     Ok((DirChunkWork { chunk, subdirs }, batches))
 }
