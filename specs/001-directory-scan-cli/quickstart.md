@@ -23,12 +23,15 @@ interrompe com código ≠ 0.
 
 ```bash
 cargo xtask synth tests/fixtures/basic.json /tmp/da-basic
-cargo run -p disk-analyst -- scan /tmp/da-basic --json > /tmp/da-basic.out.json
+cargo run -p disk-analyst -- scan /tmp/da-basic/tree --json > /tmp/da-basic.out.json
 ```
+
+O gerador cria a árvore em `<destino>/tree/` e grava `<destino>/expected.json` fora dela, para que
+o arquivo de totais não entre na própria varredura.
 
 Esperado: os testes de integração comparam `/tmp/da-basic.out.json` com
 `/tmp/da-basic/expected.json` e obtêm diferença zero em totais, contagens e rankings.
-No Windows, o mesmo com a árvore criada em `C:\Users\Public\da-basic` e o `.exe`.
+No Windows, o mesmo com a árvore criada em `C:\Users\Public\da-basic\tree` e o `.exe`.
 
 ## 3. Links, hard links, pasta negada, nuvem (US3, SC-004, SC-005)
 

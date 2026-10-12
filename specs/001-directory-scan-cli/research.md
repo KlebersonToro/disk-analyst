@@ -163,7 +163,7 @@ foram conferidos neste ambiente em 2026-10-12.
 |---|---|---|---|
 | `windows` | 0.62 | core e synth (só `cfg(windows)`) | Win32 oficial; preferida pela constituição. No synth, só para o oráculo de alocado (R10) |
 | `rayon` | 1.12 | core | Paralelismo (ADR-0005) |
-| `serde`, `serde_json` | 1.0 | core, xtask | Contrato JSON (Princípio X) |
+| `serde`, `serde_json` | 1.0 | core, synth, xtask | Contrato JSON (Princípio X); no synth, leitura da descrição e escrita do `expected.json` (R10) |
 | `lexopt` | 0.3 | cli | Argumentos com mensagens em português (R8) |
 | `ctrlc` | 3.5 | cli | Ctrl+C sem `unsafe` próprio (R7) |
 | `proptest` | 1.12 | dev | Testes por propriedade (Princípio III) |
