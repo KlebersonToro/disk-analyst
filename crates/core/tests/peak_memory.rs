@@ -15,6 +15,10 @@ fn peak_sees_a_touched_64_mib_allocation() {
         buffer[i] = 1;
     }
     black_box(&buffer);
+    // Libera antes de medir: o pico tem de sobreviver à liberação, o uso atual não. Sem este
+    // `drop`, ler o conjunto de trabalho atual (WorkingSetSize, VmRSS) também daria >= 64 MiB e o
+    // teste não distinguiria "pico" de "uso corrente".
+    drop(buffer);
 
     let peak = peak_memory_bytes().expect("pico de memória");
     println!("pico medido: {peak} bytes");
