@@ -1,5 +1,6 @@
 pub mod assemble;
 pub mod control;
+pub mod hardlinks;
 pub mod names;
 pub mod tree;
 
