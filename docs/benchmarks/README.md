@@ -14,9 +14,54 @@ afirmação de velocidade sem comando e resultado é inválida.
 
 ## Comando-padrão
 
-A definir em T019.
+Definido na T019. É o comando que toda tarefa ⏱ roda **antes e depois** (a medição é feita pelo
+`.exe` do Windows, chamado do WSL, sobre a árvore sintética grande):
 
-Enquanto isso, não há comando-padrão: nenhum registro deste diretório vale como linha de base.
+```bash
+hyperfine -N --warmup 1 --runs 5 \
+  'target/x86_64-pc-windows-gnu/release/examples/scan_totals.exe D:/Archive/Projects/disk-analyst-test/tree'
+```
+
+- `-N` (sem shell) tira o ruído de um `sh -c` do tempo medido. O caminho do Windows usa `/` porque,
+  sem shell, o `hyperfine` interpretaria `\` como escape.
+- Cache quente: `--warmup 1` faz uma execução de aquecimento antes das 5 medidas.
+- Registre mediana, mínimo e máximo (campo "Resultado" do formato abaixo). O `hyperfine` mede o
+  tempo de parede, que **inclui o custo fixo de iniciar um `.exe` do Windows pelo interop do WSL**
+  (medido com o exemplo `noop`; ver `2026-10-baseline.md`). O tempo interno da varredura, sem esse
+  custo, é a linha `tempo_ms` que o próprio `scan_totals` imprime; rode-o uma vez a mais e anote.
+
+### Pré-requisitos
+
+1. Build de release dos exemplos, do repositório:
+
+   ```bash
+   cargo build --release --target x86_64-pc-windows-gnu -p disk-analyst-core \
+     --example scan_totals --example noop
+   ```
+
+2. A árvore grande, gerada **uma vez** com o fixture `tests/fixtures/large.json` (≈ 200 mil
+   arquivos, ≈ 0,8 GB, NTFS com cluster de 4 KiB) em `D:\Archive\Projects\disk-analyst-test`, por
+   autorização do usuário em 2026-10-12. A árvore fica em `...\tree`, e o `expected.json` ao lado
+   dela. **Não apague** a pasta: ela é a base de todas as tarefas ⏱ até o usuário decidir ao fim
+   da feature.
+
+   ```bash
+   cargo build --release --target x86_64-pc-windows-gnu -p xtask
+   target/x86_64-pc-windows-gnu/release/xtask.exe synth \
+     "$(wslpath -w tests/fixtures/large.json)" 'D:\Archive\Projects\disk-analyst-test'
+   ```
+
+   O gerador recusa destino não vazio, então não sobrescreve a árvore existente. A geração é
+   lenta (≈ 44 arquivos/s no NTFS com antivírus em tempo real: 75 min na primeira vez): é um custo de
+   uma vez só.
+
+### Variações usadas na linha de base
+
+- Uma thread: `RAYON_NUM_THREADS=1 WSLENV=RAYON_NUM_THREADS hyperfine -N ...`. A variável do WSL só
+  chega ao `.exe` do Windows se estiver em `WSLENV`.
+- Custo fixo do interop: o mesmo `hyperfine -N --warmup 1 --runs 5` sobre
+  `target/x86_64-pc-windows-gnu/release/examples/noop.exe`.
+- Núcleo em memória: `cargo bench -p disk-analyst-core --bench baseline` (criterion, Linux).
 
 ## Formato obrigatório de cada registro
 
@@ -59,3 +104,8 @@ Copie, preencha e salve como `docs/benchmarks/AAAA-MM-<assunto>.md`.
 - **Resultado** (<N> execuções): mediana <valor> <unidade> · mínimo <valor> <unidade> · máximo <valor> <unidade>
 - **Observações**: <cache quente/frio; ruído; justificativa de regressão, se houver>
 ```
+
+## Registros
+
+- [`2026-10-baseline.md`](2026-10-baseline.md): linha de base da T019 (varredura de diretórios da Fase 3,
+  árvore large no `D:`, `C:\` inteiro, threads 1 × 8, interop e criterion).
