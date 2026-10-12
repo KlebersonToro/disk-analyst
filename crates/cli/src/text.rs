@@ -324,7 +324,7 @@ Duração: 9,8 s
 Maiores pastas (tamanho próprio)
   alocado próprio   alocado total   caminho
           2,9 MiB         2,9 MiB   raiz{SEP}pasta_a
-              0 B         2,9 MiB   raiz
+              0 B             0 B   raiz{SEP}pasta_b
 
 Maiores arquivos
      alocado       lógico   caminho

@@ -1,85 +1,11 @@
 //! A CLI de ponta a ponta no modo texto (T022): roda o binário de verdade sobre a árvore sintética
-//! `basic.json`. Os diretórios temporários são removidos pelo `Drop` de [`TempBase`].
+//! `basic.json`.
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+mod common;
 
-use disk_analyst_synth::{generate, load_spec};
-
-const BIN: &str = env!("CARGO_BIN_EXE_disk-analyst");
-
-static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-struct TempBase(PathBuf);
-
-impl TempBase {
-    fn new(tag: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir =
-            std::env::temp_dir().join(format!("da-cli-{tag}-{}-{nanos}-{n}", std::process::id()));
-        fs::create_dir_all(&dir).expect("criar diretório temporário");
-        TempBase(dir)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempBase {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-/// Gera `basic.json` em `base/dest` e devolve `dest/tree`.
-fn basic_tree(base: &TempBase) -> PathBuf {
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/basic.json");
-    let spec = load_spec(&fixture).expect("basic.json");
-    let dest = base.path().join("dest");
-    generate(&spec, &dest).expect("gerar basic.json");
-    dest.join("tree")
-}
-
-fn run(args: &[&std::ffi::OsStr]) -> Output {
-    Command::new(BIN)
-        .args(args)
-        .output()
-        .expect("executar disk-analyst")
-}
-
-fn run_str(args: &[&str]) -> Output {
-    let os: Vec<&std::ffi::OsStr> = args.iter().map(std::ffi::OsStr::new).collect();
-    run(&os)
-}
-
-fn code(output: &Output) -> i32 {
-    output.status.code().expect("código de saída")
-}
-
-fn stdout(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn stderr(output: &Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-/// Linhas de dados de uma tabela do relatório: depois do título e do cabeçalho, até a linha em
-/// branco (ou o fim).
-fn table_rows(text: &str, title: &str) -> usize {
-    let mut lines = text.lines().skip_while(|line| *line != title);
-    lines.next().expect("título presente");
-    lines.next().expect("cabeçalho presente");
-    lines.take_while(|line| !line.is_empty()).count()
-}
+#[cfg(unix)]
+use common::command;
+use common::{TempBase, basic_tree, code, run, run_str, stderr, stdout, table_lines};
 
 #[test]
 fn scan_prints_the_text_report_for_the_basic_tree() {
@@ -116,11 +42,11 @@ fn top_limits_each_ranking() {
     let text = stdout(&output);
     // O basic tem 10 arquivos e só 4 pastas: com --top 3 há 3 linhas em cada ranking.
     assert_eq!(
-        table_rows(&text, "Maiores pastas (tamanho próprio)"),
+        table_lines(&text, "Maiores pastas (tamanho próprio)").len(),
         3,
         "{text}"
     );
-    assert_eq!(table_rows(&text, "Maiores arquivos"), 3, "{text}");
+    assert_eq!(table_lines(&text, "Maiores arquivos").len(), 3, "{text}");
 }
 
 #[test]
@@ -233,7 +159,7 @@ fn closed_stdout_pipe_exits_1_without_panicking() {
     let (reader, writer) = std::io::pipe().expect("criar pipe");
     drop(reader);
 
-    let output = Command::new(BIN)
+    let output = command()
         .arg("scan")
         .arg(&tree)
         .stdout(writer)

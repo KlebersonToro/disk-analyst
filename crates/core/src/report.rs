@@ -13,8 +13,12 @@
 //!   conta Nodes com a marca `hardlink`.
 //! - **`top_files`**: só File que não são inacessíveis nem hard links secundários, por alocado
 //!   decrescente. Desempate pelo caminho por componentes (ver [`ScanTree::path_components`]).
-//! - **`top_folders`**: Dir não inacessíveis, com a raiz, por alocado **próprio** decrescente
-//!   (soma só dos filhos diretos que são File; secundários já valem 0). Desempate pelo caminho.
+//! - **`top_folders`**: Dir não inacessíveis, por alocado **próprio** decrescente (soma só dos
+//!   filhos diretos que são File; secundários já valem 0). Desempate pelo caminho. **Só entra pasta
+//!   com pelo menos um filho DIRETO do tipo File acessível** (um hard link secundário conta como
+//!   filho, com 0): pasta sem arquivo direto não tem "tamanho próprio". Por isso a raiz de uma
+//!   pasta vazia, ou uma pasta que só tem subpastas, não aparece (spec: "pasta vazia: rankings
+//!   vazios"). O ranking de ARQUIVOS não muda: entra todo File, inclusive de 0 B e na nuvem.
 //! - **Caminho de texto**: `root_path`, separador `MAIN_SEPARATOR` e componentes convertidos por
 //!   `to_text`. A raiz é só o `root_path`. Não se duplica o separador se `root_path` já termina
 //!   com ele. O texto tem perdas e serve só para exibição: a ordenação usa os `u16`.
@@ -109,7 +113,9 @@ pub fn build_report(tree: &ScanTree, top_n: usize) -> ScanReport {
             }
             Kind::Dir if !node.inaccessible() => {
                 totals.folders += 1;
-                folders.push((id, own_sizes(tree, id).0));
+                if let Some((own_allocated, _)) = own_sizes(tree, id) {
+                    folders.push((id, own_allocated));
+                }
             }
             Kind::Dir => {}
             Kind::Link => totals.links_not_followed += 1,
@@ -133,7 +139,8 @@ pub fn build_report(tree: &ScanTree, top_n: usize) -> ScanReport {
         .into_iter()
         .map(|(id, _)| {
             let node = tree.nodes[id as usize];
-            let (own_allocated_bytes, own_logical_bytes) = own_sizes(tree, id);
+            // Só pastas com arquivo direto foram candidatas, então `own_sizes` tem valor.
+            let (own_allocated_bytes, own_logical_bytes) = own_sizes(tree, id).unwrap_or_default();
             FolderEntry {
                 node: id,
                 path: path_text(tree, id),
@@ -155,13 +162,16 @@ pub fn build_report(tree: &ScanTree, top_n: usize) -> ScanReport {
     }
 }
 
-/// Tamanhos próprios de uma pasta: soma dos filhos diretos que são File.
-fn own_sizes(tree: &ScanTree, id: NodeId) -> (u64, u64) {
+/// Tamanhos próprios de uma pasta: soma dos filhos diretos que são File acessíveis. `None` se não
+/// há nenhum (a pasta não entra no ranking).
+fn own_sizes(tree: &ScanTree, id: NodeId) -> Option<(u64, u64)> {
     let folder = tree.nodes[id as usize];
-    (folder.first_child..folder.first_child + folder.child_count)
+    let mut files = (folder.first_child..folder.first_child + folder.child_count)
         .map(|c| tree.nodes[c as usize])
-        .filter(|n| n.kind() == Kind::File)
-        .fold((0, 0), |(a, l), n| (a + n.allocated, l + n.logical))
+        .filter(|n| n.kind() == Kind::File && !n.inaccessible())
+        .peekable();
+    files.peek()?;
+    Some(files.fold((0, 0), |(a, l), n| (a + n.allocated, l + n.logical)))
 }
 
 /// Os `top_n` maiores por tamanho, desempate pela pré-ordem (`rank`). Devolve já ordenados.
@@ -252,14 +262,7 @@ mod tests {
         let report = build_report(&scanned(vec![root, a, a1], "raiz"), 3);
 
         let paths: Vec<&str> = report.top_folders.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(
-            paths,
-            [
-                format!("raiz{SEP}a"),
-                format!("raiz{SEP}a1"),
-                "raiz".to_owned()
-            ]
-        );
+        assert_eq!(paths, [format!("raiz{SEP}a"), format!("raiz{SEP}a1")]);
     }
 
     #[test]
@@ -284,9 +287,10 @@ mod tests {
         assert_eq!(report.totals.files, 0);
         assert_eq!(report.totals.logical_bytes, 0);
         assert_eq!(report.totals.allocated_bytes, 0);
-        assert_eq!(report.top_folders.len(), 1);
-        assert_eq!(report.top_folders[0].path, "raiz");
-        assert_eq!(report.top_folders[0].own_allocated_bytes, 0);
+        assert!(
+            report.top_folders.is_empty(),
+            "pasta sem arquivo direto não entra no ranking"
+        );
         assert!(report.top_files.is_empty());
     }
 
