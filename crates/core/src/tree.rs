@@ -61,6 +61,29 @@ impl ScanTree {
         self.names.get(node.name_off, node.name_len)
     }
 
+    /// Posição de cada Item na pré-ordem: `rank[id]` é o índice de `id` nessa ordem.
+    ///
+    /// Pré-ordem = pai antes dos filhos, filhos na ordem de `first_child`. **Fato**: `assemble`
+    /// ordena os filhos de cada pasta por nome (nomes únicos entre irmãos), então esta pré-ordem é
+    /// exatamente a ordem lexicográfica dos caminhos por componentes. Se dois caminhos divergem no
+    /// componente k, o irmão de nome menor e toda a sua subárvore vêm antes; se um é prefixo do
+    /// outro, o ancestral vem antes, como em `Vec::cmp`. Logo, comparar ranks equivale a comparar
+    /// caminhos sem montá-los.
+    ///
+    /// Iterativo, com pilha explícita (filhos empilhados em ordem reversa), O(n).
+    pub fn preorder_ranks(&self) -> Vec<u32> {
+        let mut rank = vec![0; self.nodes.len()];
+        let mut stack: Vec<NodeId> = vec![0];
+        let mut next = 0;
+        while let Some(id) = stack.pop() {
+            rank[id as usize] = next;
+            next += 1;
+            let node = self.nodes[id as usize];
+            stack.extend((node.first_child..node.first_child + node.child_count).rev());
+        }
+        rank
+    }
+
     /// Componentes do caminho do Item `id`, da raiz para a folha (sem a própria raiz). Ordenar
     /// essas sequências compara componente a componente, em ordinal UTF-16.
     pub fn path_components(&self, mut id: NodeId) -> Vec<&[u16]> {
@@ -244,6 +267,68 @@ mod tests {
                 }
                 prop_assert_eq!(node.kind(), kind);
                 prop_assert_eq!(flag_states(&node), flags);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod preorder_tests {
+    use super::*;
+    use crate::assemble::{Assembled, DirChunk, assemble};
+    use crate::testgen::{Spec, chunk, ids_from};
+    use proptest::collection::vec;
+    use proptest::prelude::*;
+    use std::collections::HashSet;
+
+    const NAMES: [&str; 4] = ["a", "a1", "b", "x"];
+    const SUBS: [&str; 5] = ["s1", "s2", "s3", "s4", "s5"];
+
+    /// Árvore pequena: até 6 pastas, nomes com prefixos (a, a1) para exercitar prefixo e irmão.
+    fn small_tree() -> impl Strategy<Value = ScanTree> {
+        (1usize..=6)
+            .prop_flat_map(|k| {
+                (
+                    vec(any::<u32>(), k),
+                    vec(any::<u32>(), k),
+                    vec(vec((0..NAMES.len(), any::<bool>()), 0..=4), k),
+                )
+            })
+            .prop_map(|(parents, keys, files)| {
+                let ids = ids_from(keys);
+                let mut specs: Vec<Vec<Spec>> = vec![Vec::new(); parents.len()];
+                for child in 1..parents.len() {
+                    let parent = parents[child] as usize % child;
+                    specs[parent].push((SUBS[child - 1], Kind::Dir, Some(ids[child]), None, 0, 0));
+                }
+                for (f, list) in files.iter().enumerate() {
+                    let mut seen = HashSet::new();
+                    for &(name, link) in list {
+                        if seen.insert(name) {
+                            let kind = if link { Kind::Link } else { Kind::File };
+                            specs[f].push((NAMES[name], kind, None, None, 0, 0));
+                        }
+                    }
+                }
+                let chunks: Vec<DirChunk> =
+                    (0..specs.len()).map(|f| chunk(ids[f], &specs[f])).collect();
+                let Assembled { tree, .. } = assemble(chunks, "raiz".into());
+                tree
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn preorder_rank_order_equals_component_order(tree in small_tree()) {
+            let rank = tree.preorder_ranks();
+            for a in 0..tree.nodes.len() as NodeId {
+                for b in 0..tree.nodes.len() as NodeId {
+                    prop_assert_eq!(
+                        rank[a as usize].cmp(&rank[b as usize]),
+                        tree.path_components(a).cmp(&tree.path_components(b)),
+                        "pares ({}, {})", a, b
+                    );
+                }
             }
         }
     }

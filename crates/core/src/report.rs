@@ -22,9 +22,10 @@
 //!
 //! # Desempenho
 //!
-//! Não se constrói caminho para todo Node. Os `top_n` são escolhidos com `select_nth_unstable_by`,
-//! ordenados e só então recebem o texto do caminho. Componentes são calculados no comparador apenas
-//! quando há empate de tamanho.
+//! Os ranks de pré-ordem ([`ScanTree::preorder_ranks`]) são calculados uma vez por relatório.
+//! Desempatar por rank equivale a desempatar pelo caminho por componentes, então o comparador é
+//! só inteiros e nenhum caminho é montado para ordenar. Os `top_n` são escolhidos com `select_nth_unstable_by`,
+//! ordenados e só então recebem o texto do caminho.
 
 use std::path::MAIN_SEPARATOR;
 use std::time::Duration;
@@ -86,6 +87,7 @@ pub fn build_report(tree: &ScanTree, top_n: usize) -> ScanReport {
     };
     let mut files = Vec::new();
     let mut folders = Vec::new();
+    let rank = tree.preorder_ranks();
 
     for (i, node) in tree.nodes.iter().enumerate() {
         let id = i as NodeId;
@@ -114,7 +116,7 @@ pub fn build_report(tree: &ScanTree, top_n: usize) -> ScanReport {
         }
     }
 
-    let top_files = select_top(tree, files, top_n)
+    let top_files = select_top(&rank, files, top_n)
         .into_iter()
         .map(|(id, _)| {
             let node = tree.nodes[id as usize];
@@ -127,7 +129,7 @@ pub fn build_report(tree: &ScanTree, top_n: usize) -> ScanReport {
         })
         .collect();
 
-    let top_folders = select_top(tree, folders, top_n)
+    let top_folders = select_top(&rank, folders, top_n)
         .into_iter()
         .map(|(id, _)| {
             let node = tree.nodes[id as usize];
@@ -162,14 +164,14 @@ fn own_sizes(tree: &ScanTree, id: NodeId) -> (u64, u64) {
         .fold((0, 0), |(a, l), n| (a + n.allocated, l + n.logical))
 }
 
-/// Os `top_n` maiores por tamanho, desempate pelo caminho por componentes. Devolve já ordenados.
-fn select_top(tree: &ScanTree, mut items: Vec<(NodeId, u64)>, top_n: usize) -> Vec<(NodeId, u64)> {
+/// Os `top_n` maiores por tamanho, desempate pela pré-ordem (`rank`). Devolve já ordenados.
+fn select_top(rank: &[u32], mut items: Vec<(NodeId, u64)>, top_n: usize) -> Vec<(NodeId, u64)> {
     if top_n == 0 {
         return Vec::new();
     }
     let by_rank = |a: &(NodeId, u64), b: &(NodeId, u64)| {
         b.1.cmp(&a.1)
-            .then_with(|| tree.path_components(a.0).cmp(&tree.path_components(b.0)))
+            .then_with(|| rank[a.0 as usize].cmp(&rank[b.0 as usize]))
     };
     if items.len() > top_n {
         items.select_nth_unstable_by(top_n - 1, by_rank);
