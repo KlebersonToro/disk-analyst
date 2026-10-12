@@ -280,6 +280,7 @@ dependencies = [
  "disk-analyst-synth",
  "proptest",
  "rayon",
+ "serde",
  "serde_json",
  "windows",
 ]

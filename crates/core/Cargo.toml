@@ -9,6 +9,8 @@ name = "disk_analyst_core"
 
 [dependencies]
 rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true
@@ -19,7 +21,6 @@ windows = { workspace = true, features = ["Win32_Foundation", "Win32_Security", 
 [dev-dependencies]
 criterion.workspace = true
 proptest.workspace = true
-serde_json.workspace = true
 disk-analyst-synth = { path = "../synth" }
 
 [[bench]]

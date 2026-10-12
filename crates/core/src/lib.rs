@@ -1,6 +1,7 @@
 pub mod assemble;
 pub mod control;
 pub mod hardlinks;
+pub mod json;
 pub mod names;
 pub mod report;
 pub mod scan;
