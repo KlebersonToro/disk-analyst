@@ -1,6 +1,6 @@
 # Feature Specification: Varredura de diretórios e relatório na CLI
 
-**Feature Branch**: `001-directory-scan-cli` (sem branch dedicada ainda; trabalho em `master`)
+**Feature Branch**: `001-directory-scan-cli` (sem branch dedicada ainda; trabalho em `main`)
 
 **Created**: 2026-10-12
 
@@ -30,6 +30,10 @@ Vocabulário conforme [GLOSSARY.md](../../GLOSSARY.md). Decisões de base: ADR-0
   em ordem lexicográfica; os demais com tamanho zero, marcados.
 - Q: Como representar no JSON um nome que não é texto válido? → A: texto com U+FFFD e marca
   `name_lossy: true` no Item.
+- Q: O JSON deve conter só o relatório ou também a árvore completa de Itens? → A: sempre o
+  relatório mais a árvore completa.
+- Q: Em que idioma a CLI escreve mensagens, rótulos e erros? → A: português, idioma único na v1;
+  chaves do JSON em inglês.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -205,7 +209,9 @@ idêntico; rodar a verificação e ver todos os portões passarem.
   tamanho próprio e o tamanho agregado (com subpastas).
 - **FR-004**: O usuário MUST poder escolher entre saída de texto legível (padrão) e JSON.
 - **FR-005**: A saída JSON MUST trazer `schema_version`, ter esquema publicado no repositório e
-  testes de contrato; em modo JSON, a saída padrão contém só o documento.
+  testes de contrato; em modo JSON, a saída padrão contém só o documento. O documento contém sempre
+  o relatório (o mesmo conteúdo da saída de texto) e a árvore completa de Itens varridos, cada um
+  com seus tamanhos e marcas e a relação com a pasta-pai.
 - **FR-006**: O programa MUST usar códigos de saída distintos para: sucesso (mesmo com Itens
   inacessíveis), erro de uso ou caminho inválido, e varredura cancelada.
 
@@ -246,6 +252,9 @@ idêntico; rodar a verificação e ver todos os portões passarem.
 - **FR-018**: O tempo de varredura e a memória usada MUST ser medidos de forma repetível e
   registrados em `docs/benchmarks/`, incluindo um benchmark-base logo após o primeiro varredor
   funcional.
+- **FR-019**: Mensagens, rótulos do relatório de texto, progresso e erros MUST estar em português
+  (idioma único na v1). Chaves e valores enumerados do JSON MUST estar em inglês, por serem
+  contrato para máquinas.
 
 ### Key Entities
 
@@ -264,8 +273,10 @@ idêntico; rodar a verificação e ver todos os portões passarem.
 
 - **SC-001**: Para 100% das árvores sintéticas de teste, totais, contagens e rankings do relatório
   são idênticos aos valores esperados (diferença de zero byte).
-- **SC-002**: A varredura completa de `C:\` no hardware de referência leva menos de 15 segundos com
-  cache quente (mediana de 5 execuções após 1 de aquecimento), registrada em `docs/benchmarks/`.
+- **SC-002**: A varredura completa de `C:\` no hardware de referência, com saída de texto, leva
+  menos de 15 segundos com cache quente (mediana de 5 execuções após 1 de aquecimento), registrada
+  em `docs/benchmarks/`. O tempo e o tamanho da saída em modo JSON (com a árvore completa) também
+  são medidos e registrados, sem meta nesta feature.
 - **SC-003**: A memória por Item indexado, sem contar o nome, fica abaixo de 64 bytes, medida e
   documentada em `docs/benchmarks/`; o pico de memória da varredura de `C:\` também é registrado.
 - **SC-004**: Em árvores de teste com junctions, symlinks, hard links e pontos de montagem, nenhum
@@ -274,7 +285,8 @@ idêntico; rodar a verificação e ver todos os portões passarem.
   Itens inacessíveis contados no relatório.
 - **SC-006**: Após Ctrl+C, o relatório parcial aparece em até 1 segundo e passa na verificação de
   consistência de FR-011 em 100% das execuções de teste.
-- **SC-007**: Todo documento JSON emitido nos testes valida contra o esquema publicado.
+- **SC-007**: Todo documento JSON emitido nos testes valida contra o esquema publicado, e a árvore
+  nele contida reproduz exatamente os totais do relatório.
 
 ## Assumptions
 
