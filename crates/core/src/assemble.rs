@@ -145,7 +145,8 @@ pub fn assemble(chunks: Vec<DirChunk>, root_path: String) -> Assembled {
 /// # Regras (aplicadas antes de cada Node ser somado ao pai)
 ///
 /// - Link, item inacessível e pasta `not_scanned`: tamanhos zero (a pasta também ignora os filhos).
-/// - Nuvem: `allocated = 0`; `logical` é mantido.
+/// - Arquivo na nuvem: `allocated = 0`; `logical` é mantido. Pasta na nuvem não é zerada: é
+///   a soma dos filhos, que podem ser locais.
 ///
 /// # Panics
 ///
@@ -185,7 +186,7 @@ fn normalize(node: &mut Node) {
         node.logical = 0;
         node.allocated = 0;
     }
-    if node.cloud() {
+    if node.cloud() && node.kind() == Kind::File {
         node.allocated = 0;
     }
 }
@@ -279,7 +280,11 @@ mod tests {
 
     /// Floresta com pastas 0..k: cada pasta i > 0 é filha de uma pasta de índice menor, então
     /// todas são alcançáveis a partir da raiz.
-    fn build_forest(parents: &[u32], raws: Vec<Vec<RawEntry>>) -> Vec<Vec<MEntry>> {
+    fn build_forest(
+        parents: &[u32],
+        clouds: &[bool],
+        raws: Vec<Vec<RawEntry>>,
+    ) -> Vec<Vec<MEntry>> {
         let mut folders: Vec<Vec<MEntry>> = raws
             .into_iter()
             .map(|raw| raw.into_iter().map(MEntry::from).collect())
@@ -289,7 +294,7 @@ mod tests {
             folders[parent].push(MEntry {
                 name: Vec::new(),
                 kind: Kind::Dir,
-                cloud: false,
+                cloud: clouds[child],
                 inaccessible: false,
                 name_lossy: false,
                 logical: 0,
@@ -330,6 +335,7 @@ mod tests {
             .prop_flat_map(|k| {
                 (
                     vec(any::<u32>(), k),
+                    vec(any::<bool>(), k),
                     vec(vec(raw_entry(), 0..=6), k),
                     vec(any::<u32>(), k),
                     vec(any::<u32>(), k),
@@ -337,13 +343,15 @@ mod tests {
                     vec(any::<u32>(), k),
                 )
             })
-            .prop_map(|(parents, raws, ids_a, order_a, ids_b, order_b)| Scenario {
-                forest: build_forest(&parents, raws),
-                ids_a: ids_from(ids_a),
-                order_a: perm(&order_a),
-                ids_b: ids_from(ids_b),
-                order_b: perm(&order_b),
-            })
+            .prop_map(
+                |(parents, clouds, raws, ids_a, order_a, ids_b, order_b)| Scenario {
+                    forest: build_forest(&parents, &clouds, raws),
+                    ids_a: ids_from(ids_a),
+                    order_a: perm(&order_a),
+                    ids_b: ids_from(ids_b),
+                    order_b: perm(&order_b),
+                },
+            )
     }
 
     /// Converte o modelo em chunks: ids dados por `ids`, emitidos na ordem `order`. Com
@@ -618,7 +626,7 @@ mod tests {
                 if node.kind() == Kind::Link || node.inaccessible() || node.not_scanned() {
                     prop_assert_eq!((node.logical, node.allocated), (0, 0), "Node {}", id);
                 }
-                if node.cloud() {
+                if node.cloud() && node.kind() == Kind::File {
                     prop_assert_eq!(node.allocated, 0, "Node {}", id);
                 }
             }
@@ -675,5 +683,30 @@ mod tests {
         let mut tree = assemble(vec![chunk(0, &[])], "raiz".into()).tree;
         aggregate(&mut tree);
         assert_eq!((tree.nodes[0].logical, tree.nodes[0].allocated), (0, 0));
+    }
+
+    #[test]
+    fn cloud_folder_still_sums_its_local_children() {
+        let mut root = chunk(0, &[("od", Kind::Dir, Some(1))]);
+        root.entries[0].cloud = true;
+        let mut od = chunk(
+            1,
+            &[("local", Kind::File, None), ("remoto", Kind::File, None)],
+        );
+        od.entries[0].logical = 10;
+        od.entries[0].allocated = 12;
+        od.entries[1].logical = 5;
+        od.entries[1].allocated = 8;
+        od.entries[1].cloud = true;
+
+        let mut tree = assemble(vec![root, od], "raiz".into()).tree;
+        aggregate(&mut tree);
+
+        let size = |name: &str| {
+            let n = tree.nodes[finder(&tree, name) as usize];
+            (n.logical, n.allocated)
+        };
+        assert_eq!(size("od"), (15, 12));
+        assert_eq!((tree.nodes[0].logical, tree.nodes[0].allocated), (15, 12));
     }
 }
