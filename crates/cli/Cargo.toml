@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+disk-analyst-core = { path = "../core" }
 lexopt.workspace = true
 
 [lints]

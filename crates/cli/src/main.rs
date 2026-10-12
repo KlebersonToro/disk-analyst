@@ -4,5 +4,7 @@
     reason = "consumido pelo main e pelo relatório de texto nas T021/T022"
 )]
 mod args;
+#[allow(dead_code, reason = "consumido pelo main na T022")]
+mod text;
 
 fn main() {}
