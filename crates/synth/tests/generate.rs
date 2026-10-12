@@ -6,9 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use disk_analyst_synth::{
-    Expected, SynthError, SyntheticTreeSpec, expected_of, generate, load_spec,
-};
+use disk_analyst_synth::{Planned, SynthError, SyntheticTreeSpec, generate, load_spec, planned_of};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -165,16 +163,15 @@ fn bulk_same_seed_is_identical_and_other_seed_differs() {
 }
 
 #[test]
-fn expected_of_basic_counts_sizes_files_and_folders() {
+fn planned_of_basic_counts_sizes_files_and_folders() {
     let spec = load_spec(&fixture("basic.json")).expect("basic.json");
-    let expected: Expected = expected_of(&spec).expect("contagem");
+    let planned: Planned = planned_of(&spec).expect("contagem");
 
-    assert_eq!(expected.schema_version, 1);
     let sizes = [0u64, 1, 70_000, 4_096, 5_000, 123, 65_536, 300_000, 7, 1];
-    assert_eq!(expected.logical_bytes, sizes.iter().sum::<u64>());
-    assert_eq!(expected.files, 10);
+    assert_eq!(planned.logical_bytes, sizes.iter().sum::<u64>());
+    assert_eq!(planned.files, 10);
     assert_eq!(
-        expected.folders,
+        planned.folders,
         3 + 1,
         "três pastas da descrição mais a raiz tree/"
     );
@@ -188,15 +185,28 @@ fn expected_json_has_fixed_field_order() {
     generate(&spec, &dest).expect("geração");
 
     let text = fs::read_to_string(dest.join("expected.json")).unwrap();
-    let schema = text.find("\"schema_version\"").expect("schema_version");
-    let logical = text.find("\"logical_bytes\"").expect("logical_bytes");
-    let files = text.find("\"files\"").expect("files");
-    let folders = text.find("\"folders\"").expect("folders");
-    assert!(schema < logical && logical < files && files < folders);
+    let fields = [
+        "schema_version",
+        "logical_bytes",
+        "allocated_bytes",
+        "files",
+        "folders",
+    ];
+    let positions: Vec<usize> = fields
+        .iter()
+        .map(|f| {
+            text.find(&format!("\"{f}\""))
+                .unwrap_or_else(|| panic!("falta {f}"))
+        })
+        .collect();
+    assert!(
+        positions.windows(2).all(|w| w[0] < w[1]),
+        "ordem: {fields:?}"
+    );
 }
 
 #[test]
-fn unsafe_paths_are_rejected_with_their_reason_before_anything_is_written() {
+fn insecure_paths_are_rejected_with_their_reason_before_anything_is_written() {
     let cases = [
         ("../x", "componente \"..\""),
         ("/abs", "caminho absoluto"),
@@ -205,7 +215,7 @@ fn unsafe_paths_are_rejected_with_their_reason_before_anything_is_written() {
         ("a/../b", "componente \"..\""),
     ];
     for (bad, motivo) in cases {
-        let base = TempBase::new("unsafe");
+        let base = TempBase::new("inseguro");
         let spec = spec_from_json(&format!(
             r#"{{"entries":[{{"path":"ok.txt","kind":"file","size":1}},{{"path":"{bad}","kind":"file","size":1}}]}}"#
         ));
@@ -263,10 +273,10 @@ fn unsupported_kind_is_rejected_with_a_clear_message() {
 #[test]
 fn large_fixture_parses_and_its_count_is_in_range_without_generating() {
     let spec = load_spec(&fixture("large.json")).expect("large.json");
-    let expected = expected_of(&spec).expect("contagem sem gerar");
+    let planned = planned_of(&spec).expect("contagem sem gerar");
     assert!(
-        (190_000..=210_000).contains(&expected.files),
+        (190_000..=210_000).contains(&planned.files),
         "arquivos esperados: {}",
-        expected.files
+        planned.files
     );
 }

@@ -16,8 +16,9 @@
 //! - `bulk`: `depth` níveis de subpastas abaixo do caminho dado. Cada pasta, inclusive a de
 //!   partida, tem `files_per_dir` arquivos; pastas de nível menor que `depth` têm `dirs_per_dir`
 //!   subpastas. Tamanhos vêm de SplitMix64 semeado por `seed`. Nomes: `d000`, `f000`.
-//! - `expected.json`: `schema_version` 1, `logical_bytes` (soma dos tamanhos), `files` e
-//!   `folders`. `folders` conta as pastas dentro de `tree/` **mais a própria `tree/`** como raiz,
+//! - `expected.json`: `schema_version` 1, `logical_bytes` (soma dos tamanhos), `allocated_bytes`
+//!   (soma do alocado medido de cada arquivo depois de fechado), `files` e `folders`. O alocado
+//!   só existe em [`generate`]; [`planned_of`] não o inventa. `folders` conta as pastas dentro de `tree/` **mais a própria `tree/`** como raiz,
 //!   coerente com a regra do relatório "a raiz conta em folders".
 //! - Tipos planejados (`symlink`, `hardlink`, `junction`, `denied_dir`, `offline_file`) são lidos,
 //!   mas rejeitados com `tipo ainda não suportado: <tipo>` até as tarefas da US3.
@@ -29,6 +30,12 @@ use std::io::{self, BufWriter, Write};
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+#[cfg(windows)]
+mod ffi_windows;
+mod oracle;
+
+pub use oracle::allocated_size;
 
 /// Limite de entradas planejadas, para uma descrição mal escrita não consumir a memória.
 const MAX_ENTRIES: u64 = 10_000_000;
@@ -78,11 +85,23 @@ pub enum Entry {
     },
 }
 
-/// Totais esperados, gravados em `expected.json`. Campos na ordem de declaração.
+/// Totais planejados a partir da descrição, sem tocar no disco. Não há alocado aqui: ele só
+/// existe depois de medido (ver [`Expected`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Planned {
+    pub logical_bytes: u64,
+    pub files: u64,
+    pub folders: u64,
+}
+
+/// Totais medidos, gravados em `expected.json`. Campos na ordem de declaração.
+///
+/// `allocated_bytes` é a soma do Tamanho alocado medido de cada arquivo depois de fechado.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Expected {
     pub schema_version: u32,
     pub logical_bytes: u64,
+    pub allocated_bytes: u64,
     pub files: u64,
     pub folders: u64,
 }
@@ -140,10 +159,10 @@ pub fn load_spec(path: &Path) -> Result<SyntheticTreeSpec, SynthError> {
         .map_err(|e| SynthError::Spec(format!("JSON inválido em {}: {e}", path.display())))
 }
 
-/// Calcula o `Expected` de uma descrição sem tocar no disco.
-pub fn expected_of(spec: &SyntheticTreeSpec) -> Result<Expected, SynthError> {
+/// Calcula o [`Planned`] de uma descrição sem tocar no disco.
+pub fn planned_of(spec: &SyntheticTreeSpec) -> Result<Planned, SynthError> {
     let plan = build_plan(spec)?;
-    Ok(plan.expected())
+    Ok(plan.planned())
 }
 
 /// Gera a árvore em `dest/tree/` e grava `dest/expected.json`. `dest` não pode existir não
@@ -159,6 +178,7 @@ pub fn generate(spec: &SyntheticTreeSpec, dest: &Path) -> Result<Expected, Synth
     let tree = dest.join("tree");
     fs::create_dir_all(&tree).map_err(io_err(&tree))?;
 
+    let mut allocated_bytes: u64 = 0;
     for (rel, node) in &plan.nodes {
         let target = tree.join(rel);
         match node {
@@ -167,15 +187,30 @@ pub fn generate(spec: &SyntheticTreeSpec, dest: &Path) -> Result<Expected, Synth
                 if let Some(parent) = target.parent() {
                     fs::create_dir_all(parent).map_err(io_err(parent))?;
                 }
-                let file = fs::File::create(&target).map_err(io_err(&target))?;
-                let mut out = BufWriter::new(file);
-                write_content(&mut out, rel, *size).map_err(io_err(&target))?;
-                out.flush().map_err(io_err(&target))?;
+                {
+                    // O escopo fecha o arquivo antes da medição: o NTFS só fixa a alocação no
+                    // fechamento, então medir com o handle aberto pode dar um valor provisório.
+                    let file = fs::File::create(&target).map_err(io_err(&target))?;
+                    let mut out = BufWriter::new(file);
+                    write_content(&mut out, rel, *size).map_err(io_err(&target))?;
+                    out.flush().map_err(io_err(&target))?;
+                }
+                let measured = oracle::allocated_size(&target).map_err(io_err(&target))?;
+                allocated_bytes = allocated_bytes
+                    .checked_add(measured)
+                    .ok_or_else(|| SynthError::Spec("alocado total estoura u64".into()))?;
             }
         }
     }
 
-    let expected = plan.expected();
+    let planned = plan.planned();
+    let expected = Expected {
+        schema_version: 1,
+        logical_bytes: planned.logical_bytes,
+        allocated_bytes,
+        files: planned.files,
+        folders: planned.folders,
+    };
     let expected_path = dest.join("expected.json");
     let mut text = serde_json::to_string_pretty(&expected)
         .map_err(|e| SynthError::Spec(format!("serializar expected: {e}")))?;
@@ -215,7 +250,7 @@ struct Plan {
 }
 
 impl Plan {
-    fn expected(&self) -> Expected {
+    fn planned(&self) -> Planned {
         let mut logical_bytes = 0u64;
         let mut files = 0u64;
         let mut folders = 1u64; // a própria tree/
@@ -228,8 +263,7 @@ impl Plan {
                 Node::Dir => folders += 1,
             }
         }
-        Expected {
-            schema_version: 1,
+        Planned {
             logical_bytes,
             files,
             folders,
@@ -290,35 +324,35 @@ fn kind_name(entry: &Entry) -> &'static str {
 
 /// Valida um caminho relativo e devolve os componentes. Rejeita o que escaparia do destino.
 fn validate_path(raw: &str) -> Result<Vec<String>, SynthError> {
-    let unsafe_path = |motivo| SynthError::CaminhoInseguro {
+    let inseguro = |motivo| SynthError::CaminhoInseguro {
         path: raw.to_owned(),
         motivo,
     };
     if raw.is_empty() {
-        return Err(unsafe_path("caminho vazio"));
+        return Err(inseguro("caminho vazio"));
     }
     if raw.starts_with('/') {
-        return Err(unsafe_path("caminho absoluto"));
+        return Err(inseguro("caminho absoluto"));
     }
     if raw.contains('\\') {
-        return Err(unsafe_path("barra invertida não é separador"));
+        return Err(inseguro("barra invertida não é separador"));
     }
     let mut comps = Vec::new();
     for part in raw.split('/') {
         if part.is_empty() {
-            return Err(unsafe_path("componente vazio"));
+            return Err(inseguro("componente vazio"));
         }
         if part == ".." {
-            return Err(unsafe_path("componente \"..\""));
+            return Err(inseguro("componente \"..\""));
         }
         if part.contains(':') {
-            return Err(unsafe_path("prefixo de drive"));
+            return Err(inseguro("prefixo de drive"));
         }
         // Dupla checagem com o próprio std: o componente tem que ser um nome normal.
         let mut it = Path::new(part).components();
         match (it.next(), it.next()) {
             (Some(Component::Normal(_)), None) => {}
-            _ => return Err(unsafe_path("componente que não é nome normal")),
+            _ => return Err(inseguro("componente que não é nome normal")),
         }
         comps.push(part.to_owned());
     }
