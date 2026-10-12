@@ -1,0 +1,16 @@
+{
+  "entries": [
+    { "path": "docs", "kind": "dir" },
+    { "path": "docs/leia.txt", "kind": "file", "size": 0 },
+    { "path": "docs/nota.txt", "kind": "file", "size": 1 },
+    { "path": "docs/relatorio.bin", "kind": "file", "size": 70000 },
+    { "path": "docs/sub/a.jpg", "kind": "file", "size": 4096 },
+    { "path": "docs/sub/b.jpg", "kind": "file", "size": 5000 },
+    { "path": "docs/sub/c.jpg", "kind": "file", "size": 123 },
+    { "path": "vazia", "kind": "dir" },
+    { "path": "raiz.dat", "kind": "file", "size": 65536 },
+    { "path": "raiz2.dat", "kind": "file", "size": 300000 },
+    { "path": "tiny.txt", "kind": "file", "size": 7 },
+    { "path": "um.bin", "kind": "file", "size": 1 }
+  ]
+}

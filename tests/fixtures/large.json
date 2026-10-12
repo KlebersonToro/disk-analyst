@@ -1,0 +1,13 @@
+{
+  "entries": [
+    {
+      "path": "grande",
+      "kind": "bulk",
+      "depth": 3,
+      "dirs_per_dir": 10,
+      "files_per_dir": 180,
+      "max_size": 8192,
+      "seed": 20260612
+    }
+  ]
+}
