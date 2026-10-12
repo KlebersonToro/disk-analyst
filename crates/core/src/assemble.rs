@@ -132,6 +132,64 @@ pub fn assemble(chunks: Vec<DirChunk>, root_path: String) -> Assembled {
     }
 }
 
+/// Agregação de baixo para cima (FR-011). Roda depois de [`assemble`] e de novo depois da
+/// deduplicação de hard links (T009), por isso é idempotente.
+///
+/// # Invariante
+///
+/// `assemble` numera os Nodes em largura (BFS): todo filho tem índice maior que o do pai. Por
+/// isso, percorrer os índices de `len - 1` até `1` processa cada filho antes do pai, e a soma de
+/// cada pasta já está completa quando ela própria é processada. A correção depende disso; o
+/// `debug_assert!` no laço checa.
+///
+/// # Regras (aplicadas antes de cada Node ser somado ao pai)
+///
+/// - Link, item inacessível e pasta `not_scanned`: tamanhos zero (a pasta também ignora os filhos).
+/// - Nuvem: `allocated = 0`; `logical` é mantido.
+///
+/// # Panics
+///
+/// Se a soma de uma pasta estourar `u64`.
+pub fn aggregate(tree: &mut ScanTree) {
+    let nodes = &mut tree.nodes;
+    for node in nodes.iter_mut().filter(|n| n.kind() == Kind::Dir) {
+        node.logical = 0;
+        node.allocated = 0;
+    }
+    for i in (1..nodes.len()).rev() {
+        let parent = nodes[i].parent as usize;
+        debug_assert!(
+            parent < i,
+            "pai {parent} deve ter índice menor que o filho {i}"
+        );
+        normalize(&mut nodes[i]);
+        let (logical, allocated) = (nodes[i].logical, nodes[i].allocated);
+        let target = &mut nodes[parent];
+        target.logical = target
+            .logical
+            .checked_add(logical)
+            .expect("soma de tamanhos estourou u64");
+        target.allocated = target
+            .allocated
+            .checked_add(allocated)
+            .expect("soma de tamanhos estourou u64");
+    }
+    if let Some(root) = nodes.first_mut() {
+        normalize(root);
+    }
+}
+
+/// Aplica as regras de tamanho de um Node.
+fn normalize(node: &mut Node) {
+    if node.kind() == Kind::Link || node.inaccessible() || node.not_scanned() {
+        node.logical = 0;
+        node.allocated = 0;
+    }
+    if node.cloud() {
+        node.allocated = 0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -491,5 +549,131 @@ mod tests {
         assert_eq!(tree.nodes.len(), 2);
         assert_eq!(tree.nodes[1].child_count, 0);
         assert_eq!(tree.nodes[1].first_child, 0);
+    }
+
+    /// Árvore montada e agregada a partir do cenário; devolve (antes, depois) para que os
+    /// testes calculem o esperado a partir dos valores de entrada, sem depender de `aggregate`.
+    fn before_and_after(s: &Scenario) -> (ScanTree, ScanTree) {
+        let before = assemble(
+            build_chunks(&s.forest, &s.ids_a, &s.order_a, false),
+            "raiz".into(),
+        )
+        .tree;
+        let mut after = before.clone();
+        aggregate(&mut after);
+        (before, after)
+    }
+
+    fn children(tree: &ScanTree, id: usize) -> std::ops::Range<usize> {
+        let node = tree.nodes[id];
+        node.first_child as usize..(node.first_child + node.child_count) as usize
+    }
+
+    fn finder(tree: &ScanTree, name: &str) -> NodeId {
+        (0..tree.nodes.len() as NodeId)
+            .find(|&id| to_text(tree.name(id)).0 == name)
+            .unwrap_or_else(|| panic!("nome {name} não encontrado"))
+    }
+
+    proptest! {
+        #[test]
+        fn folders_sum_their_direct_children(s in scenario()) {
+            let (_, tree) = before_and_after(&s);
+            for id in 0..tree.nodes.len() {
+                let node = tree.nodes[id];
+                if node.kind() != Kind::Dir {
+                    continue;
+                }
+                let (logical, allocated) = if node.inaccessible() || node.not_scanned() {
+                    (0, 0)
+                } else {
+                    children(&tree, id).fold((0u64, 0u64), |(l, a), c| {
+                        (l + tree.nodes[c].logical, a + tree.nodes[c].allocated)
+                    })
+                };
+                prop_assert_eq!((node.logical, node.allocated), (logical, allocated), "pasta {}", id);
+            }
+        }
+
+        #[test]
+        fn root_equals_the_flat_sum_of_files_with_the_rules(s in scenario()) {
+            let (before, after) = before_and_after(&s);
+            // Soma plana, a partir dos valores de entrada, com as regras aplicadas aqui.
+            let (mut logical, mut allocated) = (0u64, 0u64);
+            for node in &before.nodes {
+                if node.kind() == Kind::File && !node.inaccessible() {
+                    logical += node.logical;
+                    if !node.cloud() {
+                        allocated += node.allocated;
+                    }
+                }
+            }
+            prop_assert_eq!((after.nodes[0].logical, after.nodes[0].allocated), (logical, allocated));
+        }
+
+        #[test]
+        fn normalization_rules_hold_for_every_node(s in scenario()) {
+            let (_, tree) = before_and_after(&s);
+            for (id, node) in tree.nodes.iter().enumerate() {
+                if node.kind() == Kind::Link || node.inaccessible() || node.not_scanned() {
+                    prop_assert_eq!((node.logical, node.allocated), (0, 0), "Node {}", id);
+                }
+                if node.cloud() {
+                    prop_assert_eq!(node.allocated, 0, "Node {}", id);
+                }
+            }
+        }
+
+        #[test]
+        fn aggregate_is_idempotent(s in scenario()) {
+            let (_, once) = before_and_after(&s);
+            let mut twice = once.clone();
+            aggregate(&mut twice);
+            prop_assert_eq!(&once.nodes, &twice.nodes);
+        }
+    }
+
+    #[test]
+    fn hand_built_tree_aggregates_by_hand() {
+        let mut root = chunk(
+            0,
+            &[
+                ("a", Kind::Dir, Some(1)),
+                ("b", Kind::Link, None),
+                ("c", Kind::File, None),
+            ],
+        );
+        root.entries[1].logical = 99;
+        root.entries[1].allocated = 99;
+        root.entries[2].logical = 7;
+        root.entries[2].allocated = 7;
+        root.entries[2].inaccessible = true;
+        let mut a = chunk(1, &[("x", Kind::File, None), ("y", Kind::File, None)]);
+        a.entries[0].logical = 10;
+        a.entries[0].allocated = 12;
+        a.entries[1].logical = 5;
+        a.entries[1].allocated = 8;
+        a.entries[1].cloud = true;
+
+        let mut tree = assemble(vec![root, a], "raiz".into()).tree;
+        aggregate(&mut tree);
+
+        let size = |name: &str| {
+            let n = tree.nodes[finder(&tree, name) as usize];
+            (n.logical, n.allocated)
+        };
+        assert_eq!(size("a"), (15, 12));
+        assert_eq!(size("b"), (0, 0));
+        assert_eq!(size("c"), (0, 0));
+        assert_eq!(size("y"), (5, 0));
+        assert_eq!(size("x"), (10, 12));
+        assert_eq!((tree.nodes[0].logical, tree.nodes[0].allocated), (15, 12));
+    }
+
+    #[test]
+    fn tree_with_only_the_root_aggregates_to_zero() {
+        let mut tree = assemble(vec![chunk(0, &[])], "raiz".into()).tree;
+        aggregate(&mut tree);
+        assert_eq!((tree.nodes[0].logical, tree.nodes[0].allocated), (0, 0));
     }
 }
