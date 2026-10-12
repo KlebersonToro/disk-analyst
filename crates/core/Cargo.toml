@@ -16,3 +16,6 @@ windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Proc
 [dev-dependencies]
 proptest.workspace = true
 disk-analyst-synth = { path = "../synth" }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { workspace = true, features = ["Win32_Storage_FileSystem"] }
