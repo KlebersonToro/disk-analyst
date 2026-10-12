@@ -10,5 +10,8 @@ name = "disk_analyst_core"
 [lints]
 workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+
 [dev-dependencies]
 proptest.workspace = true

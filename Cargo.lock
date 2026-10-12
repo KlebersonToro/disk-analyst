@@ -110,6 +110,7 @@ name = "disk-analyst-core"
 version = "0.1.0"
 dependencies = [
  "proptest",
+ "windows",
 ]
 
 [[package]]
