@@ -94,7 +94,7 @@ medição de memória. **Nenhuma história começa antes desta fase.**
 
 - [x] T025 [US2] Implementar a serialização em `crates/core/src/json.rs` (R9): `serde` para o relatório e escrita em streaming de `items[]` (lista plana, `id` = posição, `parent` nulo na raiz, `kind` em `file|dir|link`, `flags` em `cloud|inaccessible|hardlink|name_lossy|not_scanned`, nomes convertidos por `NameBuf::to_text` com `name_lossy`) num `impl Write`. Teste primeiro: JSON exato (golden) de uma árvore de 4 Itens montada à mão, incluindo um nome com surrogate solto.
 - [x] T026 [US2] Ligar `--json` em `crates/cli/src/main.rs`: stdout recebe só o documento; progresso nunca escrito em modo JSON. Teste primeiro: `crates/cli/tests/contract_json.rs` com `jsonschema` (dev-dependency, `default-features = false`) valida a saída contra `docs/schemas/scan-report-v1.schema.json`; verifica que a soma dos arquivos em `items` reproduz `totals` (SC-007); `--json --progress` deixa stderr vazio.
-- [ ] T027 [US2] Determinismo (US2, cenário 3): `crates/cli/tests/json_determinism.rs` roda duas varreduras da mesma árvore synth e compara os documentos ignorando só `duration_ms`. Teste primeiro: o teste em si; corrigir qualquer fonte de não determinismo encontrada.
+- [x] T027 [US2] Determinismo (US2, cenário 3): `crates/cli/tests/json_determinism.rs` roda duas varreduras da mesma árvore synth e compara os documentos ignorando só `duration_ms`. Teste primeiro: o teste em si; corrigir qualquer fonte de não determinismo encontrada.
 
 **Checkpoint**: US1 e US2 completas; contrato JSON v1 congelado.
 
