@@ -11,6 +11,13 @@ afirmação de velocidade sem comando e resultado é inválida.
 - **Regressão sem justificativa registrada bloqueia a tarefa.** A justificativa vai no campo
   "Observações" do registro "depois".
 - Otimização sem medição não entra.
+- **O que se compara (decisão de 2026-10-12, após a T019):** o tempo de parede do comando-padrão
+  inclui ≈ 213 ms fixos do interop do WSL e, na árvore grande, só ≈ 65 ms são varredura. Por isso
+  toda tarefa ⏱ registra **os dois**: (1) o comando-padrão (parede, `hyperfine`) e (2) o **tempo
+  interno** — mediana de 5 execuções diretas do `scan_totals.exe`, linha `tempo_ms`, depois de 1 de
+  aquecimento. **A decisão de regressão ou ganho usa o tempo interno**; a parede é registrada para
+  detectar efeitos fora da varredura (início do processo, saída). Mudanças que afetem o tempo de
+  iniciar ou encerrar o processo (ex.: escrita da saída) são julgadas também pela parede.
 
 ## Comando-padrão
 
