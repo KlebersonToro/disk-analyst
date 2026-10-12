@@ -116,3 +116,5 @@ Copie, preencha e salve como `docs/benchmarks/AAAA-MM-<assunto>.md`.
 
 - [`2026-10-baseline.md`](2026-10-baseline.md): linha de base da T019 (varredura de diretórios da Fase 3,
   árvore large no `D:`, `C:\` inteiro, threads 1 × 8, interop e criterion).
+- [`2026-10-json.md`](2026-10-json.md): tempo e tamanho da saída `--json` (T026, SC-002), na árvore large e no
+  `C:\`, com a ressalva de ruído do volume em uso.
