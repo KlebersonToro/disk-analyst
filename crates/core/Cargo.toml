@@ -1,0 +1,11 @@
+[package]
+name = "disk-analyst-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "disk_analyst_core"
+
+[lints]
+workspace = true
