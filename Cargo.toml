@@ -9,3 +9,6 @@ rust-version = "1.99"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
+
+[workspace.dependencies]
+proptest = "1.12"

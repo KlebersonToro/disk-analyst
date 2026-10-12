@@ -9,3 +9,6 @@ name = "disk_analyst_core"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
