@@ -1,0 +1,6 @@
+# Rust
+/target/
+
+# Claude Code: versiona só as skills do Spec Kit; o resto é estado local
+/.claude/*
+!/.claude/skills/
