@@ -60,6 +60,18 @@ impl ScanTree {
         let node = &self.nodes[id as usize];
         self.names.get(node.name_off, node.name_len)
     }
+
+    /// Componentes do caminho do Item `id`, da raiz para a folha (sem a própria raiz). Ordenar
+    /// essas sequências compara componente a componente, em ordinal UTF-16.
+    pub fn path_components(&self, mut id: NodeId) -> Vec<&[u16]> {
+        let mut parts = Vec::new();
+        while self.nodes[id as usize].parent != NO_PARENT {
+            parts.push(self.name(id));
+            id = self.nodes[id as usize].parent;
+        }
+        parts.reverse();
+        parts
+    }
 }
 
 macro_rules! flag_accessors {

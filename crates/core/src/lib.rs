@@ -2,6 +2,7 @@ pub mod assemble;
 pub mod control;
 pub mod hardlinks;
 pub mod names;
+pub mod report;
 #[cfg(test)]
 pub(crate) mod testgen;
 pub mod tree;

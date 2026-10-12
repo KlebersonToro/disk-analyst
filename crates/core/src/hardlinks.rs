@@ -20,17 +20,6 @@
 use crate::assemble::aggregate;
 use crate::tree::{NodeId, ScanTree};
 
-/// Componentes do caminho do Node `id`, da raiz para a folha (sem a própria raiz).
-fn path_components(tree: &ScanTree, mut id: NodeId) -> Vec<&[u16]> {
-    let mut parts = Vec::new();
-    while tree.nodes[id as usize].parent != crate::tree::NO_PARENT {
-        parts.push(tree.name(id));
-        id = tree.nodes[id as usize].parent;
-    }
-    parts.reverse();
-    parts
-}
-
 /// Deduplica os hard links e re-agrega a árvore. Devolve quantos Nodes ficaram como secundários
 /// (marcados com `hardlink`).
 ///
@@ -58,7 +47,7 @@ pub fn dedup_hardlinks(tree: &mut ScanTree, mut candidates: Vec<(u64, NodeId)>) 
         let winner = group
             .iter()
             .map(|&(_, id)| id)
-            .min_by(|&a, &b| path_components(tree, a).cmp(&path_components(tree, b)))
+            .min_by(|&a, &b| tree.path_components(a).cmp(&tree.path_components(b)))
             .expect("grupo com mais de um elemento");
         secondary.extend(group.iter().map(|&(_, id)| id).filter(|&id| id != winner));
     }
