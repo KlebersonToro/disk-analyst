@@ -1,6 +1,11 @@
 //! Utilidades compartilhadas pelos testes de integração da CLI. Todo diretório temporário é
 //! removido pelo `Drop` de [`TempBase`], inclusive quando o teste falha.
 
+#![allow(
+    dead_code,
+    reason = "cada teste de integração usa um subconjunto destes helpers"
+)]
+
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};

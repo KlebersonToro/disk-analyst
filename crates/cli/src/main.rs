@@ -6,7 +6,12 @@
 //! escrever a saída. O relatório NÃO usa `print!`/`println!`, que dão pânico com o pipe fechado:
 //! a escrita passa por um `BufWriter` e o erro vira código 1.
 //!
-//! Ainda sem `--json` (T025/T026), `--progress` (US5), `--stats` (T039) e Ctrl+C (T037).
+//! Com `--json`, stdout recebe SÓ o documento do esquema v1 (T025/T026) e o aviso de `--progress` não
+//! é emitido (o contrato diz que ele é ignorado nesse modo); o aviso de `--stats` continua, porque
+//! o `--stats` vai para stderr e é ortogonal. Erro de varredura com `--json`: código 2, mensagem em
+//! stderr e stdout VAZIO (nada de JSON parcial).
+//!
+//! Ainda sem `--progress` (US5), `--stats` (T039) e Ctrl+C (T037).
 
 mod args;
 mod text;
@@ -15,6 +20,7 @@ use std::io::{self, BufWriter, Write};
 use std::process::ExitCode;
 
 use disk_analyst_core::control::{CancelToken, ScanCounters};
+use disk_analyst_core::json::{ToolInfo, write_json};
 use disk_analyst_core::report::build_report;
 use disk_analyst_core::scan::{ScanOptions, scan};
 
@@ -62,11 +68,8 @@ fn write_stdout(
 }
 
 fn run_scan(args: &ScanArgs) -> ExitCode {
-    if args.json {
-        // Temporário até a T026: quem pede JSON não pode receber outra coisa no lugar.
-        return usage_error("--json ainda não disponível");
-    }
-    if args.progress {
+    // `--progress` é ignorado com `--json` (contrato), então nem o aviso sai: stderr fica limpo.
+    if args.progress && !args.json {
         stderr_line("aviso: --progress ainda não disponível; ignorado");
     }
     if args.stats {
@@ -91,5 +94,13 @@ fn run_scan(args: &ScanArgs) -> ExitCode {
     };
 
     let report = build_report(&tree, args.top.get());
-    write_stdout(|out| text::write_text(out, &report, &tree))
+    if args.json {
+        let tool = ToolInfo {
+            name: "disk-analyst",
+            version: env!("CARGO_PKG_VERSION"),
+        };
+        write_stdout(|out| write_json(out, &report, &tree, &tool))
+    } else {
+        write_stdout(|out| text::write_text(out, &report, &tree))
+    }
 }

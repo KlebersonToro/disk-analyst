@@ -76,23 +76,6 @@ fn engine_mft_exits_2_with_the_agreed_message() {
 }
 
 #[test]
-fn json_is_temporarily_a_usage_error_and_prints_nothing_to_stdout() {
-    let output = run_str(&["scan", ".", "--json"]);
-
-    assert_eq!(code(&output), 2);
-    assert!(
-        stderr(&output).contains("--json ainda não disponível"),
-        "{}",
-        stderr(&output)
-    );
-    assert_eq!(
-        stdout(&output),
-        "",
-        "quem pede JSON não pode receber outra coisa"
-    );
-}
-
-#[test]
 fn help_and_version_exit_0_on_stdout() {
     let help = run_str(&["--help"]);
     assert_eq!(code(&help), 0);
