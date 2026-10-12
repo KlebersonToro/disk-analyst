@@ -391,4 +391,26 @@ mod tests {
         assert_eq!(report.top_files.len(), 1);
         assert_eq!(report.top_files[0].node, finder(&tree, "big"));
     }
+
+    #[test]
+    fn ties_follow_the_component_order_not_the_node_id_order() {
+        // Em largura (NodeId): a=1, z=2, a/m=3, z/f=4, a/m/f=5. Por componentes: a/m/f < z/f e
+        // a/m < z. As duas ordens divergem, então um desempate por NodeId trocaria o vencedor.
+        let root = chunk(
+            0,
+            &[
+                ("z", Kind::Dir, Some(1), None, 0, 0),
+                ("a", Kind::Dir, Some(2), None, 0, 0),
+            ],
+        );
+        let z = chunk(1, &[("f", Kind::File, None, None, 10, 12)]);
+        let a = chunk(2, &[("m", Kind::Dir, Some(3), None, 0, 0)]);
+        let m = chunk(3, &[("f", Kind::File, None, None, 10, 12)]);
+        let tree = scanned(vec![root, z, a, m], "raiz");
+
+        let report = build_report(&tree, 1);
+
+        assert_eq!(report.top_files[0].path, format!("raiz{SEP}a{SEP}m{SEP}f"));
+        assert_eq!(report.top_folders[0].path, format!("raiz{SEP}a{SEP}m"));
+    }
 }
