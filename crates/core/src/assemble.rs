@@ -195,6 +195,7 @@ fn normalize(node: &mut Node) {
 mod tests {
     use super::*;
     use crate::names::to_text;
+    use crate::testgen::{chunk, finder, ids_from, perm};
     use crate::tree::NO_PARENT;
     use proptest::collection::vec;
     use proptest::prelude::*;
@@ -312,25 +313,7 @@ mod tests {
         folders
     }
 
-    /// Permutação dos índices ordenada pelas chaves (empate desfeito pelo índice).
-    fn perm(keys: &[u32]) -> Vec<usize> {
-        let mut idx: Vec<usize> = (0..keys.len()).collect();
-        idx.sort_by_key(|&i| (keys[i], i));
-        idx
-    }
-
-    /// Ids temporários como permutação das posições; a raiz fica sempre com id 0.
-    fn ids_from(mut keys: Vec<u32>) -> Vec<u32> {
-        keys[0] = 0;
-        let order = perm(&keys);
-        let mut ids = vec![0; keys.len()];
-        for (pos, &folder) in order.iter().enumerate() {
-            ids[folder] = pos as u32;
-        }
-        ids
-    }
-
-    fn scenario() -> impl Strategy<Value = Scenario> {
+    fn forest_scenario() -> impl Strategy<Value = Scenario> {
         (1usize..=10)
             .prop_flat_map(|k| {
                 (
@@ -403,7 +386,7 @@ mod tests {
         );
         let mut visited = Vec::new();
         let mut candidates = Vec::new();
-        walk(tree, forest, 0, 0, &mut visited, &mut candidates);
+        check_node(tree, forest, 0, 0, &mut visited, &mut candidates);
         visited.sort_unstable();
         assert_eq!(
             visited,
@@ -414,7 +397,7 @@ mod tests {
         candidates
     }
 
-    fn walk(
+    fn check_node(
         tree: &ScanTree,
         forest: &[Vec<MEntry>],
         node: NodeId,
@@ -462,7 +445,7 @@ mod tests {
                 candidates.push((fid, child_id));
             }
             match e.subdir {
-                Some(sub) => walk(tree, forest, child_id, sub, visited, candidates),
+                Some(sub) => check_node(tree, forest, child_id, sub, visited, candidates),
                 None => assert_eq!(child.child_count, 0, "pasta não percorrida sem filhos"),
             }
         }
@@ -470,7 +453,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn output_does_not_depend_on_ids_or_chunk_order(s in scenario()) {
+        fn output_does_not_depend_on_ids_or_chunk_order(s in forest_scenario()) {
             let a = assemble(build_chunks(&s.forest, &s.ids_a, &s.order_a, false), "raiz".into());
             let b = assemble(build_chunks(&s.forest, &s.ids_b, &s.order_b, true), "raiz".into());
             prop_assert_eq!(&a.tree.nodes, &b.tree.nodes);
@@ -483,7 +466,7 @@ mod tests {
         }
 
         #[test]
-        fn result_matches_the_model_and_its_invariants(s in scenario()) {
+        fn result_matches_the_model_and_its_invariants(s in forest_scenario()) {
             let a = assemble(build_chunks(&s.forest, &s.ids_a, &s.order_a, false), "raiz".into());
             let expected_candidates = check_against_model(&a.tree, &s.forest);
             let mut got = a.hardlink_candidates.clone();
@@ -492,36 +475,16 @@ mod tests {
         }
     }
 
-    fn chunk(id: u32, entries: &[(&str, Kind, Option<u32>)]) -> DirChunk {
-        let mut names = Vec::new();
-        let mut out = Vec::new();
-        for &(name, kind, subdir) in entries {
-            let units: Vec<u16> = name.encode_utf16().collect();
-            out.push(ChunkEntry {
-                name_off: names.len() as u32,
-                name_len: units.len() as u16,
-                kind,
-                cloud: false,
-                inaccessible: false,
-                name_lossy: false,
-                logical: 0,
-                allocated: 0,
-                file_id: None,
-                subdir,
-            });
-            names.extend(units);
-        }
-        DirChunk {
-            id,
-            names,
-            entries: out,
-        }
-    }
-
     #[test]
     fn small_tree_is_sorted_and_linked_by_hand() {
-        let root = chunk(0, &[("b", Kind::File, None), ("a", Kind::Dir, Some(1))]);
-        let a = chunk(1, &[("x", Kind::File, None)]);
+        let root = chunk(
+            0,
+            &[
+                ("b", Kind::File, None, None, 0, 0),
+                ("a", Kind::Dir, Some(1), None, 0, 0),
+            ],
+        );
+        let a = chunk(1, &[("x", Kind::File, None, None, 0, 0)]);
 
         let tree = assemble(vec![root, a], "C:\\teste".into()).tree;
 
@@ -550,7 +513,7 @@ mod tests {
 
     #[test]
     fn subdir_without_chunk_has_no_children_and_does_not_panic() {
-        let root = chunk(0, &[("d", Kind::Dir, Some(9))]);
+        let root = chunk(0, &[("d", Kind::Dir, Some(9), None, 0, 0)]);
 
         let tree = assemble(vec![root], "raiz".into()).tree;
 
@@ -577,15 +540,9 @@ mod tests {
         node.first_child as usize..(node.first_child + node.child_count) as usize
     }
 
-    fn finder(tree: &ScanTree, name: &str) -> NodeId {
-        (0..tree.nodes.len() as NodeId)
-            .find(|&id| to_text(tree.name(id)).0 == name)
-            .unwrap_or_else(|| panic!("nome {name} não encontrado"))
-    }
-
     proptest! {
         #[test]
-        fn folders_sum_their_direct_children(s in scenario()) {
+        fn folders_sum_their_direct_children(s in forest_scenario()) {
             let (_, tree) = before_and_after(&s);
             for id in 0..tree.nodes.len() {
                 let node = tree.nodes[id];
@@ -604,7 +561,7 @@ mod tests {
         }
 
         #[test]
-        fn root_equals_the_flat_sum_of_files_with_the_rules(s in scenario()) {
+        fn root_equals_the_flat_sum_of_files_with_the_rules(s in forest_scenario()) {
             let (before, after) = before_and_after(&s);
             // Soma plana, a partir dos valores de entrada, com as regras aplicadas aqui.
             let (mut logical, mut allocated) = (0u64, 0u64);
@@ -620,7 +577,7 @@ mod tests {
         }
 
         #[test]
-        fn normalization_rules_hold_for_every_node(s in scenario()) {
+        fn normalization_rules_hold_for_every_node(s in forest_scenario()) {
             let (_, tree) = before_and_after(&s);
             for (id, node) in tree.nodes.iter().enumerate() {
                 if node.kind() == Kind::Link || node.inaccessible() || node.not_scanned() {
@@ -633,7 +590,7 @@ mod tests {
         }
 
         #[test]
-        fn aggregate_is_idempotent(s in scenario()) {
+        fn aggregate_is_idempotent(s in forest_scenario()) {
             let (_, once) = before_and_after(&s);
             let mut twice = once.clone();
             aggregate(&mut twice);
@@ -646,9 +603,9 @@ mod tests {
         let mut root = chunk(
             0,
             &[
-                ("a", Kind::Dir, Some(1)),
-                ("b", Kind::Link, None),
-                ("c", Kind::File, None),
+                ("a", Kind::Dir, Some(1), None, 0, 0),
+                ("b", Kind::Link, None, None, 0, 0),
+                ("c", Kind::File, None, None, 0, 0),
             ],
         );
         root.entries[1].logical = 99;
@@ -656,7 +613,13 @@ mod tests {
         root.entries[2].logical = 7;
         root.entries[2].allocated = 7;
         root.entries[2].inaccessible = true;
-        let mut a = chunk(1, &[("x", Kind::File, None), ("y", Kind::File, None)]);
+        let mut a = chunk(
+            1,
+            &[
+                ("x", Kind::File, None, None, 0, 0),
+                ("y", Kind::File, None, None, 0, 0),
+            ],
+        );
         a.entries[0].logical = 10;
         a.entries[0].allocated = 12;
         a.entries[1].logical = 5;
@@ -687,11 +650,14 @@ mod tests {
 
     #[test]
     fn cloud_folder_still_sums_its_local_children() {
-        let mut root = chunk(0, &[("od", Kind::Dir, Some(1))]);
+        let mut root = chunk(0, &[("od", Kind::Dir, Some(1), None, 0, 0)]);
         root.entries[0].cloud = true;
         let mut od = chunk(
             1,
-            &[("local", Kind::File, None), ("remoto", Kind::File, None)],
+            &[
+                ("local", Kind::File, None, None, 0, 0),
+                ("remoto", Kind::File, None, None, 0, 0),
+            ],
         );
         od.entries[0].logical = 10;
         od.entries[0].allocated = 12;

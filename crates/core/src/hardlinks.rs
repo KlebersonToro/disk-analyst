@@ -77,42 +77,11 @@ pub fn dedup_hardlinks(tree: &mut ScanTree, mut candidates: Vec<(u64, NodeId)>) 
 mod tests {
     use super::*;
     use crate::assemble::{Assembled, ChunkEntry, DirChunk, assemble};
-    use crate::names::to_text;
+    use crate::testgen::{chunk, finder, ids_from, perm};
     use crate::tree::{Kind, NO_PARENT};
     use proptest::collection::vec;
     use proptest::prelude::*;
     use std::collections::BTreeMap;
-
-    /// (nome, kind, subdir, file_id, logical, allocated)
-    type Spec<'a> = (&'a str, Kind, Option<u32>, Option<u64>, u64, u64);
-
-    fn chunk(id: u32, specs: &[Spec]) -> DirChunk {
-        let mut names = Vec::new();
-        let mut entries = Vec::new();
-        for &(name, kind, subdir, file_id, logical, allocated) in specs {
-            let units: Vec<u16> = name.encode_utf16().collect();
-            entries.push(ChunkEntry {
-                name_off: names.len() as u32,
-                name_len: units.len() as u16,
-                kind,
-                cloud: false,
-                inaccessible: false,
-                name_lossy: false,
-                logical,
-                allocated,
-                file_id,
-                subdir,
-            });
-            names.extend(units);
-        }
-        DirChunk { id, names, entries }
-    }
-
-    fn finder(tree: &ScanTree, name: &str) -> NodeId {
-        (0..tree.nodes.len() as NodeId)
-            .find(|&id| to_text(tree.name(id)).0 == name)
-            .unwrap_or_else(|| panic!("nome {name} não encontrado"))
-    }
 
     #[test]
     fn three_links_keep_the_size_only_once() {
@@ -167,6 +136,41 @@ mod tests {
         assert_eq!(removed, 1);
         assert!(!tree.nodes[finder(&tree, "x") as usize].hardlink());
         assert!(tree.nodes[finder(&tree, "y") as usize].hardlink());
+        assert_eq!((tree.nodes[0].logical, tree.nodes[0].allocated), (10, 12));
+    }
+
+    #[test]
+    fn winner_has_a_larger_node_id_than_the_loser() {
+        // BFS: z=1, a=2 (filhos da raiz em ordem de nome); z/f=4 e a/m=3, a/m/f=5.
+        // O menor NodeId é z/f (perdedor); quem vence por componentes é a/m/f.
+        let root = chunk(
+            0,
+            &[
+                ("z", Kind::Dir, Some(1), None, 0, 0),
+                ("a", Kind::Dir, Some(2), None, 0, 0),
+            ],
+        );
+        let z = chunk(1, &[("f", Kind::File, None, Some(1), 10, 12)]);
+        let a = chunk(2, &[("m", Kind::Dir, Some(3), None, 0, 0)]);
+        let m = chunk(3, &[("f", Kind::File, None, Some(1), 10, 12)]);
+        let Assembled {
+            mut tree,
+            hardlink_candidates,
+        } = assemble(vec![root, z, a, m], "raiz".into());
+
+        let z_f = tree.nodes[finder(&tree, "z") as usize].first_child;
+        let a_m = tree.nodes[finder(&tree, "a") as usize].first_child;
+        let a_m_f = tree.nodes[a_m as usize].first_child;
+        assert!(
+            a_m_f > z_f,
+            "o vencedor precisa ter NodeId maior que o perdedor"
+        );
+
+        let removed = dedup_hardlinks(&mut tree, hardlink_candidates);
+
+        assert_eq!(removed, 1);
+        assert!(!tree.nodes[a_m_f as usize].hardlink());
+        assert!(tree.nodes[z_f as usize].hardlink());
         assert_eq!((tree.nodes[0].logical, tree.nodes[0].allocated), (10, 12));
     }
 
@@ -268,22 +272,6 @@ mod tests {
         folders
     }
 
-    fn perm(keys: &[u32]) -> Vec<usize> {
-        let mut idx: Vec<usize> = (0..keys.len()).collect();
-        idx.sort_by_key(|&i| (keys[i], i));
-        idx
-    }
-
-    fn ids_from(mut keys: Vec<u32>) -> Vec<u32> {
-        keys[0] = 0;
-        let order = perm(&keys);
-        let mut ids = vec![0; keys.len()];
-        for (pos, &folder) in order.iter().enumerate() {
-            ids[folder] = pos as u32;
-        }
-        ids
-    }
-
     fn chunks_of(
         folders: &[Vec<MEntry>],
         ids: &[u32],
@@ -352,7 +340,7 @@ mod tests {
             )
     }
 
-    fn scenario() -> impl Strategy<Value = Scenario> {
+    fn hardlink_scenario() -> impl Strategy<Value = Scenario> {
         (1usize..=6)
             .prop_flat_map(|k| {
                 (
@@ -382,7 +370,7 @@ mod tests {
 
     /// Caminho de cada arquivo com file_id, lido da arena mas com nomes e estrutura do modelo.
     fn model_files(tree: &ScanTree, folders: &[Vec<MEntry>]) -> Vec<ModelFile> {
-        fn walk(
+        fn collect_files(
             tree: &ScanTree,
             folders: &[Vec<MEntry>],
             node: NodeId,
@@ -399,7 +387,7 @@ mod tests {
                     .expect("filho sem entrada no modelo");
                 prefix.push(name);
                 match entry.sub {
-                    Some(sub) => walk(tree, folders, child, sub, prefix, out),
+                    Some(sub) => collect_files(tree, folders, child, sub, prefix, out),
                     None => {
                         if let Some(fid) = entry.fid {
                             out.push((fid, prefix.clone(), child));
@@ -410,7 +398,7 @@ mod tests {
             }
         }
         let mut out = Vec::new();
-        walk(tree, folders, 0, 0, &mut Vec::new(), &mut out);
+        collect_files(tree, folders, 0, 0, &mut Vec::new(), &mut out);
         out
     }
 
@@ -439,7 +427,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn dedup_keeps_the_model_winner_and_the_totals(s in scenario()) {
+        fn dedup_keeps_the_model_winner_and_the_totals(s in hardlink_scenario()) {
             let a = assemble(chunks_of(&s.folders, &s.ids_a, &s.order_a, false), "raiz".into());
             let files = model_files(&a.tree, &s.folders);
             let mut tree = a.tree;
@@ -475,7 +463,7 @@ mod tests {
         }
 
         #[test]
-        fn dedup_is_deterministic_across_ids_and_order(s in scenario()) {
+        fn dedup_is_deterministic_across_ids_and_order(s in hardlink_scenario()) {
             let a = assemble(chunks_of(&s.folders, &s.ids_a, &s.order_a, false), "raiz".into());
             let b = assemble(chunks_of(&s.folders, &s.ids_b, &s.order_b, true), "raiz".into());
             let (mut ta, mut tb) = (a.tree, b.tree);
