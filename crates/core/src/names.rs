@@ -4,7 +4,7 @@
 //! A conversão para texto só acontece na borda, em [`to_text`].
 
 /// `Vec<u16>` contínuo com todos os nomes de uma varredura.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct NameBuf {
     units: Vec<u16>,
 }

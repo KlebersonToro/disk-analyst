@@ -1,3 +1,4 @@
+pub mod assemble;
 pub mod control;
 pub mod names;
 pub mod tree;

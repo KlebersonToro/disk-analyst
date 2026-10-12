@@ -1,5 +1,8 @@
 //! Arena de Itens: `Vec<Node>` compacto (data-model.md, seção Node).
 
+use crate::names::NameBuf;
+use std::time::Duration;
+
 /// Índice de um [`Node`] na arena.
 pub type NodeId = u32;
 
@@ -40,6 +43,24 @@ pub struct Node {
 }
 
 const _: () = assert!(size_of::<Node>() <= 40);
+
+/// Árvore completa de uma varredura: arena de Itens e nomes. Índice 0 é a raiz.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanTree {
+    pub nodes: Vec<Node>,
+    pub names: NameBuf,
+    pub root_path: String,
+    pub partial: bool,
+    pub duration: Duration,
+}
+
+impl ScanTree {
+    /// Nome do Item `id`, em UTF-16 bruto.
+    pub fn name(&self, id: NodeId) -> &[u16] {
+        let node = &self.nodes[id as usize];
+        self.names.get(node.name_off, node.name_len)
+    }
+}
 
 macro_rules! flag_accessors {
     ($($get:ident, $set:ident, $bit:ident;)*) => {$(
