@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/KlebersonToro/disk-analyst/docs/schemas/scan-report-v1.schema.json",
+  "title": "Disk Analyst scan report, v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "tool", "root", "engine", "partial", "duration_ms", "totals", "top_folders", "top_files", "items"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "disk-analyst" },
+        "version": { "type": "string" }
+      }
+    },
+    "root": { "type": "string", "description": "Caminho da raiz como pedido pelo usuário" },
+    "engine": { "enum": ["dir"] },
+    "partial": { "type": "boolean" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logical_bytes", "allocated_bytes", "files", "folders", "inaccessible", "cloud_files", "links_not_followed", "hardlink_duplicates"],
+      "properties": {
+        "logical_bytes": { "$ref": "#/$defs/count" },
+        "allocated_bytes": { "$ref": "#/$defs/count" },
+        "files": { "$ref": "#/$defs/count" },
+        "folders": { "$ref": "#/$defs/count" },
+        "inaccessible": { "$ref": "#/$defs/count" },
+        "cloud_files": { "$ref": "#/$defs/count" },
+        "links_not_followed": { "$ref": "#/$defs/count" },
+        "hardlink_duplicates": { "$ref": "#/$defs/count" }
+      }
+    },
+    "top_folders": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "own_allocated_bytes", "own_logical_bytes", "allocated_bytes", "logical_bytes"],
+        "properties": {
+          "path": { "type": "string" },
+          "own_allocated_bytes": { "$ref": "#/$defs/count" },
+          "own_logical_bytes": { "$ref": "#/$defs/count" },
+          "allocated_bytes": { "$ref": "#/$defs/count" },
+          "logical_bytes": { "$ref": "#/$defs/count" }
+        }
+      }
+    },
+    "top_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "allocated_bytes", "logical_bytes", "flags"],
+        "properties": {
+          "path": { "type": "string" },
+          "allocated_bytes": { "$ref": "#/$defs/count" },
+          "logical_bytes": { "$ref": "#/$defs/count" },
+          "flags": { "$ref": "#/$defs/flags" }
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "Árvore completa em lista plana; items[0] é a raiz. Ordem determinística: id = posição na lista; os filhos de cada pasta são contíguos e ordenados por nome (ordinal UTF-16).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "parent", "name", "kind", "logical_bytes", "allocated_bytes", "flags"],
+        "properties": {
+          "id": { "$ref": "#/$defs/count" },
+          "parent": { "type": ["integer", "null"], "minimum": 0 },
+          "name": { "type": "string" },
+          "kind": { "enum": ["file", "dir", "link"] },
+          "logical_bytes": { "$ref": "#/$defs/count" },
+          "allocated_bytes": { "$ref": "#/$defs/count" },
+          "flags": { "$ref": "#/$defs/flags" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "count": { "type": "integer", "minimum": 0 },
+    "flags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["cloud", "inaccessible", "hardlink", "name_lossy", "not_scanned"] }
+    }
+  }
+}
