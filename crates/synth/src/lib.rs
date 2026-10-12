@@ -25,7 +25,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
-use std::io;
+use std::io::{self, BufWriter, Write};
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -167,7 +167,10 @@ pub fn generate(spec: &SyntheticTreeSpec, dest: &Path) -> Result<Expected, Synth
                 if let Some(parent) = target.parent() {
                     fs::create_dir_all(parent).map_err(io_err(parent))?;
                 }
-                fs::write(&target, file_content(rel, *size)).map_err(io_err(&target))?;
+                let file = fs::File::create(&target).map_err(io_err(&target))?;
+                let mut out = BufWriter::new(file);
+                write_content(&mut out, rel, *size).map_err(io_err(&target))?;
+                out.flush().map_err(io_err(&target))?;
             }
         }
     }
@@ -447,14 +450,53 @@ fn fnv1a(text: &str) -> u64 {
     hash
 }
 
-/// Conteúdo determinístico de exatamente `size` bytes, semeado pelo caminho relativo.
-fn file_content(rel: &str, size: u64) -> Vec<u8> {
-    let size = usize::try_from(size).expect("tamanho cabe em usize");
+/// Tamanho do bloco de escrita. A memória usada não cresce com o tamanho do arquivo.
+const BLOCK_SIZE: usize = 64 * 1024;
+
+/// Escreve exatamente `size` bytes de conteúdo determinístico, semeado pelo caminho relativo.
+///
+/// Streaming com buffer fixo de [`BLOCK_SIZE`]: o laço só aloca esse bloco, qualquer que seja
+/// `size`. Os bytes são os mesmos de gerar a sequência de palavras de 8 bytes e truncar no fim.
+fn write_content<W: Write>(out: &mut W, rel: &str, size: u64) -> io::Result<()> {
     let mut rng = SplitMix64::new(fnv1a(rel));
-    let mut out = Vec::with_capacity(size + 8);
-    while out.len() < size {
-        out.extend_from_slice(&rng.next_u64().to_le_bytes());
+    let mut block = vec![0u8; BLOCK_SIZE];
+    let mut remaining = size;
+    while remaining > 0 {
+        // `min` garante n <= BLOCK_SIZE, que cabe em usize.
+        let n = remaining.min(BLOCK_SIZE as u64) as usize;
+        for word in block[..n].chunks_mut(8) {
+            let bytes = rng.next_u64().to_le_bytes();
+            word.copy_from_slice(&bytes[..word.len()]);
+        }
+        out.write_all(&block[..n])?;
+        remaining -= n as u64;
     }
-    out.truncate(size);
-    out
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Implementação de referência em memória: a versão anterior à escrita em streaming. Mantida
+    /// só para comparar byte a byte com `write_content`.
+    fn reference(rel: &str, size: u64) -> Vec<u8> {
+        let size = usize::try_from(size).expect("tamanho cabe em usize");
+        let mut rng = SplitMix64::new(fnv1a(rel));
+        let mut out = Vec::with_capacity(size + 8);
+        while out.len() < size {
+            out.extend_from_slice(&rng.next_u64().to_le_bytes());
+        }
+        out.truncate(size);
+        out
+    }
+
+    #[test]
+    fn streaming_matches_reference_across_block_edges() {
+        for size in [0, 1, 7, 8, 9, 65_535, 65_536, 65_537, 3 * 65_536 + 5] {
+            let mut out = Vec::new();
+            write_content(&mut out, "docs/x.bin", size).expect("escrita em memória");
+            assert_eq!(out, reference("docs/x.bin", size), "tamanho {size}");
+        }
+    }
 }
